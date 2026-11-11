@@ -1,0 +1,257 @@
+{
+  "retrieved_at_utc": "2026-11-11T23:35:37+00:00",
+  "routes": {
+    "demand": {
+      "route": "electricity/rto/region-data",
+      "startPeriod": "2019-01-01T00",
+      "endPeriod": "2026-11-12T08",
+      "facets": [
+        "respondent",
+        "type"
+      ],
+      "rows": 68926
+    },
+    "subba": {
+      "route": "electricity/rto/region-sub-ba-data",
+      "startPeriod": "2019-01-01T00",
+      "endPeriod": "2026-11-11T08",
+      "facets": [
+        "subba",
+        "parent"
+      ],
+      "rows": 1371860
+    },
+    "fuel": {
+      "route": "electricity/rto/fuel-type-data",
+      "startPeriod": "2019-01-01T00",
+      "endPeriod": "2026-11-11T07",
+      "facets": [
+        "respondent",
+        "fueltype"
+      ],
+      "rows": 551223
+    }
+  },
+  "generators_meta": {
+    "startPeriod": "2008-01",
+    "endPeriod": "2026-08",
+    "frequency": [
+      "monthly"
+    ],
+    "data_columns": [
+      "nameplate-capacity-mw",
+      "net-summer-capacity-mw",
+      "net-winter-capacity-mw",
+      "operating-year-month",
+      "planned-retirement-year-month",
+      "planned-derate-year-month",
+      "planned-derate-summer-cap-mw",
+      "planned-uprate-year-month",
+      "planned-uprate-summer-cap-mw",
+      "county",
+      "longitude",
+      "latitude"
+    ],
+    "facets": [
+      "stateid",
+      "sector",
+      "entityid",
+      "plantid",
+      "generatorid",
+      "unit",
+      "technology",
+      "energy_source_code",
+      "prime_mover_code",
+      "balancing_authority_code",
+      "status"
+    ]
+  },
+  "generators_status_facet": [
+    {
+      "id": "OP",
+      "name": "Operating"
+    },
+    {
+      "id": "OS",
+      "name": "Out of service and NOT expected to return to service in next calendar year"
+    },
+    {
+      "id": "SB",
+      "name": "Standby/Backup: available for service but not normally used"
+    },
+    {
+      "id": "OA",
+      "name": "Out of service but expected to return to service in next calendar year"
+    }
+  ],
+  "generators_baseline": {
+    "period": "2022-11",
+    "rows": 3654
+  },
+  "generators_latest": {
+    "period": "2026-08",
+    "rows": 4061
+  },
+  "plants": {
+    "snapshot_period": "2026-08",
+    "units": 4059,
+    "units_without_coordinates_excluded": 4,
+    "status_counts": [
+      {
+        "status": "OA",
+        "statusdesc": "Out of service but expected to return to service in next calendar year",
+        "state_cls": "operating",
+        "n": 21
+      },
+      {
+        "status": "OP",
+        "statusdesc": "Operating",
+        "state_cls": "operating",
+        "n": 3815
+      },
+      {
+        "status": "OS",
+        "statusdesc": "Out of service and NOT expected to return to service in next calendar year",
+        "state_cls": "operating",
+        "n": 69
+      },
+      {
+        "status": "SB",
+        "statusdesc": "Standby/Backup: available for service but not normally used",
+        "state_cls": "operating",
+        "n": 154
+      }
+    ],
+    "source_codes_unmapped_to_named_group": [
+      "BFG",
+      "BLQ",
+      "DFO",
+      "JF",
+      "LFG",
+      "MSW",
+      "OBG",
+      "OBS",
+      "OG",
+      "PC",
+      "RFO",
+      "WDS",
+      "WH"
+    ],
+    "baseline_units": 3654,
+    "latest_units": 4061,
+    "removed_since_baseline": 274
+  },
+  "demand": {
+    "hourly_rows": 68926,
+    "non_positive_rows_dropped": 0,
+    "months": 96,
+    "first_month": "2018-12",
+    "last_month": "2026-11",
+    "zones": [
+      "AE",
+      "AEP",
+      "AP",
+      "ATSI",
+      "BC",
+      "CE",
+      "DAY",
+      "DEOK",
+      "DOM",
+      "DPL",
+      "DUQ",
+      "EKPC",
+      "JC",
+      "ME",
+      "PE",
+      "PEP",
+      "PL",
+      "PN",
+      "PS",
+      "RECO"
+    ],
+    "partial_months": [
+      "2018-12",
+      "2020-08",
+      "2023-11",
+      "2026-11"
+    ]
+  },
+  "fuel": {
+    "hourly_rows": 550287,
+    "codes_unmapped": [],
+    "first_month": "2018-12",
+    "last_month": "2026-11"
+  },
+  "built_at_utc": "2026-11-11T23:49:13+00:00",
+  "window_start": "2022-11-30",
+  "baseline_window": [
+    "2021-11",
+    "2022-10"
+  ],
+  "groups": [
+    {
+      "key": "gas",
+      "label": "Natural gas"
+    },
+    {
+      "key": "coal",
+      "label": "Coal"
+    },
+    {
+      "key": "nuclear",
+      "label": "Nuclear"
+    },
+    {
+      "key": "solar",
+      "label": "Solar"
+    },
+    {
+      "key": "wind",
+      "label": "Wind"
+    },
+    {
+      "key": "hydro",
+      "label": "Hydro"
+    },
+    {
+      "key": "storage",
+      "label": "Storage"
+    },
+    {
+      "key": "other",
+      "label": "Other"
+    }
+  ],
+  "pjm_states_with_eia_plants": [
+    "DC",
+    "DE",
+    "IL",
+    "IN",
+    "KY",
+    "MD",
+    "MI",
+    "MN",
+    "NC",
+    "NJ",
+    "OH",
+    "PA",
+    "TN",
+    "VA",
+    "WV"
+  ],
+  "im3": {
+    "source": "IM3 Open Source Data Center Atlas (PNNL / MSD-LIVE), file version 2026.11.02",
+    "file": "im3_open_source_data_center_atlas_v2026.11.02.csv",
+    "sha256": "879232690702c2bf206d20592952fc4d089bd31327246eb457c414eada2e0ae8",
+    "rows_in_file": 2018,
+    "multi_county_rows_merged": 7,
+    "rows": 2011,
+    "by_type": {
+      "building": 1634,
+      "campus": 249,
+      "point": 128
+    },
+    "license": "ODbL 1.0 (derived from OpenStreetMap contributors)"
+  },
+  "synthetic": false
+}
