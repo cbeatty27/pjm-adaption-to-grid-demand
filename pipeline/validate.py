@@ -30,6 +30,8 @@ def main() -> int:
     for k in ("baseline", "latest"):
         if not 50_000 < dem["comparison"][k]["avg_mw"] < 200_000:
             errs.append(f"{k} average demand outside 50-200 GW")
+    if max(p for p in m["peak_mw"] if p is not None) > 250_000:
+        errs.append("a monthly peak above 250 GW survived cleaning")
     if not dem["zones"]:
         errs.append("no PJM subregion (zone) data")
     gs = fuel["comparison"]["latest"]["gwh"]

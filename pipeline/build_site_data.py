@@ -172,12 +172,34 @@ def month_key(ts: pd.Series) -> pd.Series:
     return ts.dt.strftime("%Y-%m")
 
 
+# Reporting-error screen for hourly demand. EIA-930 contains impossible values (for example
+# 2,147,480,000 MW, the largest 32-bit integer). An hour is dropped when it is more than
+# OUT_HI times or less than OUT_LO times the median of the surrounding 7 days of the same
+# series. Dropped hours are listed in meta.json; nothing is filled in or estimated.
+OUT_HI, OUT_LO, OUT_WINDOW = 1.5, 0.5, "7D"
+
+
+def drop_outlier_hours(df: pd.DataFrame, label: str) -> tuple[pd.DataFrame, list[dict]]:
+    """df has unique `ts` (tz-aware) and numeric `val`. Returns (kept rows, dropped-hour records)."""
+    df = df.sort_values("ts").reset_index(drop=True)
+    s = pd.Series(df["val"].to_numpy(), index=df["ts"].dt.tz_convert("UTC"))
+    med = s.rolling(OUT_WINDOW, center=True, min_periods=24).median()
+    bad = ((s > OUT_HI * med) | (s < OUT_LO * med)).to_numpy()
+    dropped = [
+        {"series": label, "hour_et": df["ts"].iloc[i].strftime("%Y-%m-%d %H:00"),
+         "value_mw": round(float(df["val"].iloc[i]), 1), "week_median_mw": round(float(med.iloc[i]), 1)}
+        for i in bad.nonzero()[0]
+    ]
+    return df.loc[~bad].copy(), dropped
+
+
 def build_demand(meta: dict) -> None:
     d = hourly_et(read("demand_hourly.csv.gz"))
     n_all = len(d)
     d = d.dropna(subset=["val"])
     nonpos = int((d["val"] <= 0).sum())
     d = d[d["val"] > 0].drop_duplicates(subset="ts")
+    d, dropped = drop_outlier_hours(d, "PJM")
     d["m"] = month_key(d["ts"])
     agg = d.groupby("m")["val"].agg(avg="mean", peak="max", low="min", n="count", total="sum").reset_index()
     agg["exp"] = agg["m"].map(expected_hours)
@@ -198,6 +220,12 @@ def build_demand(meta: dict) -> None:
     if len(s):
         s = hourly_et(s).dropna(subset=["val"])
         s = s[s["val"] > 0].drop_duplicates(subset=["ts", "subba"])
+        kept = []
+        for z, gz in s.groupby("subba"):
+            gz, dz = drop_outlier_hours(gz, str(z))
+            kept.append(gz)
+            dropped += dz
+        s = pd.concat(kept, ignore_index=True)
         s["m"] = month_key(s["ts"])
         za = s.groupby(["subba", "m"])["val"].agg(avg="mean", peak="max", n="count").reset_index()
         names = s.drop_duplicates("subba").set_index("subba")["subba-name"].to_dict() if "subba-name" in s else {}
@@ -234,6 +262,10 @@ def build_demand(meta: dict) -> None:
     (OUT / "demand.json").write_text(json.dumps(out, separators=(",", ":")))
     meta["demand"] = {
         "hourly_rows": n_all, "non_positive_rows_dropped": nonpos, "months": len(months),
+        "outlier_rule": {"high_x_median": OUT_HI, "low_x_median": OUT_LO, "window": "centered 7 days, same series"},
+        "outlier_hours_dropped": len(dropped),
+        "outlier_hours_dropped_pjm": sum(1 for r in dropped if r["series"] == "PJM"),
+        "outlier_hours": dropped[:400],
         "first_month": months[0], "last_month": months[-1], "zones": sorted(zones),
         "partial_months": [m for m, c in zip(months, monthly["coverage"]) if c < 0.97],
     }
