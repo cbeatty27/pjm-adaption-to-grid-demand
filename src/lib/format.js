@@ -1,0 +1,12 @@
+export const nf0 = new Intl.NumberFormat('en-US', { maximumFractionDigits: 0 });
+export const nf1 = new Intl.NumberFormat('en-US', { maximumFractionDigits: 1 });
+export const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+export const mw = (v) => (v == null ? 'n/a' : `${nf0.format(v)} MW`);
+export const gw = (v) => `${nf1.format(v / 1000)} GW`;
+export const pct = (v, d = 1) => (v == null || !isFinite(v) ? 'n/a' : `${v >= 0 ? '+' : '−'}${Math.abs(v).toFixed(d)}%`);
+export const pp = (v) => (v == null ? 'n/a' : `${v >= 0 ? '+' : '−'}${Math.abs(v).toFixed(1)} pts`);
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+export const ymLabel = (ym) => { const [y, m] = ym.split('-').map(Number); return `${MONTHS[m - 1]} ${y}`; };
+export const ymIndex = (ym) => { const [y, m] = ym.split('-').map(Number); return y * 12 + (m - 1); };
+export const indexYm = (i) => `${Math.floor(i / 12)}-${String((i % 12) + 1).padStart(2, '0')}`;
+export const sum = (a) => a.reduce((x, y) => x + (y || 0), 0);
