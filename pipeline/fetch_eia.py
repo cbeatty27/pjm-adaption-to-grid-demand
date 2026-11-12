@@ -205,7 +205,7 @@ def pull_retired(prov: dict) -> None:
             raise RuntimeError(f"{path.name} is not an Excel file (starts with {head[:40]!r}); EIA probably refused the scripted download")
         sha = hashlib.sha256(path.read_bytes()).hexdigest()
         sheets = pd.read_excel(path, sheet_name=None, header=None, dtype=str)
-        name = next((k for k in sheets if "retired" in k.lower()), None)
+        name = next((k for k in sheets if k.strip().lower() == "retired"), None) or next((k for k in sheets if "retired" in k.lower() and "pr" not in k.lower().split("_")), None)
         if not name:
             raise RuntimeError(f"no Retired sheet; sheets are {list(sheets)}")
         raw = sheets[name]

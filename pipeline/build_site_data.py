@@ -386,7 +386,7 @@ def build_retired(meta: dict) -> None:
         df, plant=["plantid"], gen=["generatorid"], name=["plantname"], state=["plantstate", "stateid", "state"],
         src=["energysourcecode", "energysource1"], msum=["netsummercapacitymw"], mw=["nameplatecapacitymw"],
         om=["operatingmonth"], oy=["operatingyear"], rm=["retirementmonth"], ry=["retirementyear"],
-        lat=["latitude"], lon=["longitude"],
+        lat=["latitude"], lon=["longitude"], ba=["balancingauthoritycode"],
     )
     need = ["plant", "gen", "src", "rm", "ry"]
     if not all(c[k] for k in need) or not (c["msum"] or c["mw"]):
@@ -410,6 +410,7 @@ def build_retired(meta: dict) -> None:
         "name": df[c["name"]] if c["name"] else "", "state": df[c["state"]] if c["state"] else "",
         "src": df[c["src"]].astype(str).str.strip(), "mw": num(basis_col), "ret": ret, "online": onl,
         "lat": num(c["lat"]), "lon": num(c["lon"]),
+        "ba": df[c["ba"]].astype(str).str.strip() if c["ba"] else "",
     })
     t["group"] = t["src"].map(lambda s: G.GEN_SOURCE.get(s, "other"))
     in_tab = int(len(t))
@@ -425,7 +426,10 @@ def build_retired(meta: dict) -> None:
             col = resolve(d, plant=["plantid"])["plant"]
             if col:
                 pjm_ids |= {pid(x) for x in d[col]}
-    kept["pjm"] = kept["plant"].isin(pjm_ids)
+    # PJM = EIA's own balancing authority code on the Retired tab; where that is blank, a plant-ID match to the PJM snapshots
+    ba_known = kept["ba"].str.len() > 0
+    kept["pjm"] = (kept["ba"] == "PJM") | (~ba_known & kept["plant"].isin(pjm_ids))
+    pjm_by_ba, pjm_by_id = int((kept["ba"] == "PJM").sum()), int((~ba_known & kept["plant"].isin(pjm_ids)).sum())
 
     # coordinates: the tab's own when present, else the plant's coordinates in the baseline snapshot
     base_us = CACHE / "generators_us_baseline.csv.gz"
@@ -471,7 +475,8 @@ def build_retired(meta: dict) -> None:
         "rows_after_snapshot_period_excluded": beyond, "pjm_rows": int(kept["pjm"].sum()),
         "coordinates_from_tab": from_tab, "rows_without_coordinates": no_xy,
         "retirement_months": [str(kept["ret"].min()), str(kept["ret"].max())] if len(kept) else [],
-        "pjm_rule": "plant ID appears in the PJM balancing-authority snapshots from the generator-inventory API route",
+        "pjm_rule": "balancing authority code PJM on the Retired tab; where the code is blank, plant ID found in the PJM snapshots from the generator-inventory API route",
+        "pjm_rows_by_ba_code": pjm_by_ba, "pjm_rows_by_plant_id": pjm_by_id,
         "crosscheck": xc,
     })
 
