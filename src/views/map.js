@@ -54,7 +54,7 @@ function tintBasemap(map) {
 // IM3 records in states where EIA lists PJM generators (optional). scope 'us': every EIA generator in the
 // 50 states and every IM3 record.
 export function mount(root, data) {
-  return mountMap(root, data, { scope: 'pjm', units: data.units, snapshot: data.meta.plants.snapshot_period, statusNames: {} });
+  return mountMap(root, data, { scope: 'pjm', units: data.units, snapshot: data.meta.plants.snapshot_period, statusNames: {}, retired: data.retired ? data.retired.filter((r) => r.pjm) : null });
 }
 
 export async function mountMap(root, data, opt) {
@@ -81,7 +81,10 @@ export async function mountMap(root, data, opt) {
   winUnits.forEach((u) => { monthly[u.t - WIN - 1][u.group] += u.mw || 0; });
   const maxMonth = Math.max(1, ...monthly.map((m) => sum(Object.values(m))));
 
-  const state = { s: N - 1, mode: 'cum', playing: false, fuels: new Set(groups.map((g) => g.key)), showFleet: false, showDc: true, dcPjmOnly: true, dcTypes: new Set(['building', 'campus', 'point']) };
+  // Retired generators (EIA-860M "Retired" tab), placed at the plant's coordinates; month index of retirement in .t
+  const retired = (opt.retired || []).filter((r) => r.lat != null && r.lon != null && r.ret && ymIndex(r.ret) > WIN && ymIndex(r.ret) <= LATEST).map((r) => ({ ...r, t: ymIndex(r.ret) }));
+
+  const state = { s: N - 1, mode: 'cum', playing: false, showRet: true, fuels: new Set(groups.map((g) => g.key)), showFleet: false, showDc: true, dcPjmOnly: true, dcTypes: new Set(['building', 'campus', 'point']) };
 
   root.innerHTML = `
     <div class="mapview">
@@ -91,11 +94,13 @@ export async function mountMap(root, data, opt) {
           <h2 id="sumTitle"></h2>
           <div class="side__big num"><span id="sumMw"></span><small>MW nameplate</small></div>
           <p class="side__sub" id="sumSub"></p>
+          <p class="side__sub" id="sumRet"></p>
           <ul class="fuelrows" id="fuelRows"></ul>
         </section>
         <section class="side__section">
           <h2>Layers</h2>
           <div class="toggles">
+            ${retired.length || opt.retired ? `<label class="check"><input type="checkbox" id="lyRet" checked><span>Generators retired since Dec 2022<small>Hollow rings in the fuel's color at the plant's location, from the "Retired" tab of EIA's monthly generator file. They follow the slider by retirement month.</small></span></label>` : ''}
             <label class="check"><input type="checkbox" id="lyFleet"><span>Generators online before the window<small>EIA operating units with an operating month up to ${esc(ymLabel(indexYm(WIN)))}, drawn faintly for context.</small></span></label>
             <label class="check"><input type="checkbox" id="lyDc" checked><span>Data center records (IM3, static)<small>IM3 has no online date, so these do not move with the slider. Footprint area sets symbol size; the shape shows the record type.</small></span></label>
             <div class="chips" id="dcTypes" role="group" aria-label="IM3 record types"></div>
@@ -142,6 +147,7 @@ export async function mountMap(root, data, opt) {
   const dcFc = toFc(dcs, (u, i) => ({ type: u.type, st: u.state_abb, sqft: u.sqft ?? 0, i }));
   const byWin = new Map(winUnits.map((u) => [`${u.plant}|${u.gen}`, u]));
   const byFleet = new Map(fleetUnits.map((u) => [`${u.plant}|${u.gen}`, u]));
+  const retFc = toFc(retired, (u, i) => ({ group: u.group, mw: Math.max(u.mw || 0, 0), t: u.t, i }));
 
   const colorExpr = ['match', ['get', 'group'], ...groups.flatMap((g) => [g.key, FUEL_COLOR[g.key] || FUEL_COLOR.other]), FUEL_COLOR.other];
   const radiusAt = (k) => ['interpolate', ['linear'], ['sqrt', ['max', ['get', 'mw'], 0]], 0, 2.5 * k, 12, 6 * k, 32, 12 * k];
@@ -157,6 +163,10 @@ export async function mountMap(root, data, opt) {
     const time = state.mode === 'cum' ? ['<=', ['get', 't'], T] : ['==', ['get', 't'], T];
     map.setFilter('win', ['all', time, fuel]);
     map.setFilter('fleet', fuel);
+    if (map.getLayer('ret')) {
+      map.setFilter('ret', ['all', state.mode === 'cum' ? ['<=', ['get', 't'], T] : ['==', ['get', 't'], T], fuel]);
+      map.setLayoutProperty('ret', 'visibility', state.showRet ? 'visible' : 'none');
+    }
     map.setLayoutProperty('fleet', 'visibility', state.showFleet ? 'visible' : 'none');
     const dcF = ['all', ['in', ['get', 'type'], ['literal', [...state.dcTypes]]]];
     if (!US && state.dcPjmOnly) dcF.push(['in', ['get', 'st'], ['literal', [...pjmStates]]]);
@@ -170,11 +180,13 @@ export async function mountMap(root, data, opt) {
     map.addSource('fleet', { type: 'geojson', data: fleetFc });
     map.addSource('win', { type: 'geojson', data: winFc });
     map.addSource('dc', { type: 'geojson', data: dcFc });
+    map.addSource('ret', { type: 'geojson', data: retFc });
     map.addLayer({ id: 'fleet', type: 'circle', source: 'fleet', paint: { 'circle-color': colorExpr, 'circle-opacity': 0.3, 'circle-radius': radius(0.8) } });
     map.addLayer({
       id: 'dc', type: 'symbol', source: 'dc',
       layout: { 'icon-image': ['match', ['get', 'type'], 'campus', 'dc-campus', 'point', 'dc-point', 'dc-building'], 'icon-allow-overlap': true, 'icon-size': iconSize },
     });
+    map.addLayer({ id: 'ret', type: 'circle', source: 'ret', paint: { 'circle-color': 'rgba(255,255,255,0.35)', 'circle-stroke-color': colorExpr, 'circle-stroke-width': 2.2, 'circle-radius': radius(0.9) } });
     map.addLayer({ id: 'win', type: 'circle', source: 'win', paint: { 'circle-color': colorExpr, 'circle-opacity': 0.94, 'circle-radius': radius(1), 'circle-stroke-color': '#ffffff', 'circle-stroke-width': 1.2 } });
 
     const pts = units.filter((u) => u.lat != null && u.lon != null);
@@ -204,6 +216,19 @@ export async function mountMap(root, data, opt) {
       map.on('mouseenter', id, () => (map.getCanvas().style.cursor = 'pointer'));
       map.on('mouseleave', id, () => (map.getCanvas().style.cursor = ''));
     }
+    map.on('click', 'ret', (e) => {
+      const r = retired[e.features[0].properties.i];
+      show(e, `<div class="pop"><h4>${esc(r.name || `Plant ${r.plant}`)}</h4><table>
+        <tr><td>Generator</td><td>${esc(r.gen)} (EIA plant ${esc(r.plant)})</td></tr>
+        <tr><td>Energy source</td><td>${esc(r.src)} (${esc(groups.find((g) => g.key === r.group)?.label)})</td></tr>
+        <tr><td>${esc(meta.retired.capacity_basis.replace(/^./, (c) => c.toUpperCase()))}</td><td>${esc(fmtMw(r.mw))}</td></tr>
+        <tr><td>Retired</td><td>${esc(ymLabel(r.ret))}</td></tr>
+        <tr><td>Operating since</td><td>${esc(r.online ? ymLabel(r.online) : 'not reported')}</td></tr>
+        <tr><td>State</td><td>${esc(r.state || 'n/a')}</td></tr></table>
+        <div class="fine">EIA-860M monthly generator file, "Retired" tab. Location is the plant's EIA coordinates.</div></div>`);
+    });
+    map.on('mouseenter', 'ret', () => (map.getCanvas().style.cursor = 'pointer'));
+    map.on('mouseleave', 'ret', () => (map.getCanvas().style.cursor = ''));
     map.on('click', 'dc', (e) => {
       const d = dcs[e.features[0].properties.i];
       show(e, `<div class="pop"><h4>${esc(d.name || 'Unnamed record')}</h4><table>
@@ -234,6 +259,10 @@ export async function mountMap(root, data, opt) {
       : `Reaching operation in ${ymLabel(indexYm(T))}`;
     $('sumMw').textContent = nf0.format(mwTot);
     $('sumSub').textContent = `${nf0.format(nTot)} generator units. Click a fuel to hide or show it.`;
+    if (opt.retired) {
+      const rr = (opt.retired || []).filter((r) => r.ret && ymIndex(r.ret) > WIN && (state.mode === 'cum' ? ymIndex(r.ret) <= T : ymIndex(r.ret) === T) && state.fuels.has(r.group));
+      $('sumRet').textContent = `Retired in the same period: ${nf0.format(sum(rr.map((r) => r.mw)))} MW (${nf0.format(rr.length)} units, ${meta.retired.capacity_basis}).`;
+    }
     const max = Math.max(1, ...groups.map((g) => tot[g.key].mw));
     $('fuelRows').innerHTML = groups.map((g) => `<li><button class="fuelrow" type="button" data-fuel="${g.key}" aria-pressed="${state.fuels.has(g.key)}">
         <i style="background:${FUEL_COLOR[g.key]}"></i><span>${esc(g.label)}</span>
@@ -257,6 +286,7 @@ export async function mountMap(root, data, opt) {
     const t = b.dataset.type; state.dcTypes.has(t) ? state.dcTypes.delete(t) : state.dcTypes.add(t);
     b.setAttribute('aria-pressed', String(state.dcTypes.has(t))); applyFilters(); updateDcCount();
   });
+  $('lyRet')?.addEventListener('change', (e) => { state.showRet = e.target.checked; applyFilters(); });
   $('lyFleet').addEventListener('change', (e) => { state.showFleet = e.target.checked; applyFilters(); });
   $('lyDc').addEventListener('change', (e) => { state.showDc = e.target.checked; applyFilters(); updateDcCount(); });
   $('dcPjm')?.addEventListener('change', (e) => { state.dcPjmOnly = e.target.checked; applyFilters(); updateDcCount(); });

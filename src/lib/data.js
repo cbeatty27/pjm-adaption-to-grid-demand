@@ -26,8 +26,10 @@ export function loadAll() {
     const [meta, plantsRaw, demand, fuel, dcRaw] = await Promise.all([
       get('meta.json'), get('plants.json'), get('demand.json'), get('fuelmix.json'), get('datacenters.json'),
     ]);
+    const retRaw = meta.retired?.rows_kept != null ? await get('retired.json', true) : null;
     return {
       meta, demand, fuel,
+      retired: retRaw ? unpack(retRaw) : null, // every retired unit; `pjm` marks plants in the PJM snapshots
       units: unpack({ columns: plantsRaw.columns, rows: plantsRaw.units }),
       removed: removedSummary(plantsRaw.removed_since_baseline, meta.groups),
       removedBaseline: plantsRaw.removed_since_baseline.baseline_period,

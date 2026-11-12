@@ -22,12 +22,15 @@ export function mount(root, data) {
 
   const winUnits = units.filter((u) => u.state_cls === 'operating' && u.online && ymIndex(u.online) > ymIndex(meta.window_start.slice(0, 7)) && ymIndex(u.online) <= ymIndex(meta.plants.snapshot_period));
   const addedMw = sum(winUnits.map((u) => u.mw));
+  const pjmRetired = data.retired ? data.retired.filter((r) => r.pjm) : null;
+  const retiredMw = pjmRetired ? sum(pjmRetired.map((r) => r.mw)) : null;
   const dTot = (tot(fl) - tot(fb)) / 1000;
   root.querySelector('#ledger').innerHTML = [
     ['Average hourly demand', `${nf0.format(l.avg_mw)} MW`, `${pct(dem(b.avg_mw, l.avg_mw))} vs ${nf0.format(b.avg_mw)} MW the year before`, TIME.warm],
     ['Generation, all fuels', `${nf1.format(tot(fl) / 1000)} TWh`, `${sgn(dTot)} TWh (${pct(dem(tot(fb), tot(fl)))}) vs the year before`, '#7aa6b8'],
     ['Natural gas share of generation', `${nf1.format(share(fl, 'gas'))}%`, `${pp(share(fl, 'gas') - share(fb, 'gas'))} vs ${nf1.format(share(fb, 'gas'))}% the year before`, FUEL_COLOR.gas],
     ['Generators online since Dec 2022', `${nf0.format(addedMw)} MW`, `${nf0.format(winUnits.length)} units, nameplate (EIA)`, '#1f7a8c'],
+    ...(pjmRetired ? [['Generators retired since Dec 2022', `${nf0.format(retiredMw)} MW`, `${nf0.format(pjmRetired.length)} units, ${meta.retired.capacity_basis} (EIA)`, '#8a5a83']] : []),
   ].map(([k, v, s, c]) => `<div style="--ledger:${c}"><dt>${esc(k)}</dt><dd>${esc(v)}<small>${esc(s)}</small></dd></div>`).join('');
 
   const figs = root.querySelector('#figs');
@@ -61,7 +64,7 @@ export function mount(root, data) {
   }
 
   push(fuelFigure(figs, { meta, fuel, fm: meta.fuel, scope: 'PJM', winUnits }));
-  push(additionsFigure(figs, { meta, units, winUnits, removed: data.removed, snapshot: meta.plants.snapshot_period, removedBaseline: data.removedBaseline, scopeNote: ' in the PJM balancing authority' }));
+  push(additionsFigure(figs, { meta, units, winUnits, removed: data.removed, snapshot: meta.plants.snapshot_period, removedBaseline: data.removedBaseline, scopeNote: ' in the PJM balancing authority', retired: pjmRetired, scopeLabel: 'pjm' }));
   push(dcFigure(figs, { dcs, dcMeta: data.dcMeta, states: new Set(meta.pjm_states_with_eia_plants), scopeText: 'among states where EIA lists PJM generators' }));
 
   return () => parts.forEach((p) => p.destroy());

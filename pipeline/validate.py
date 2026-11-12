@@ -60,6 +60,15 @@ def main() -> int:
         utot = sum(v for k, v in ug.items() if k != "storage")
         if not 2_500_000 < utot < 6_000_000:
             errs.append(f"latest 12-month U.S. generation {utot/1000:.0f} TWh outside 2500-6000 TWh")
+    rt = meta.get("retired", {})
+    if rt.get("rows_kept") is not None:
+        ret = json.loads((OUT / "retired.json").read_text())
+        rc = ret["columns"]
+        tot = sum((r[rc.index("mw")] or 0) for r in ret["rows"])
+        if not 3_000 < tot < 150_000:
+            errs.append(f"U.S. capacity retired since Dec 2022 is {tot:,.0f} MW, outside 3-150 GW")
+        if not any(r[rc.index("pjm")] for r in ret["rows"]):
+            errs.append("no retired unit matched a PJM plant ID")
     if errs:
         print("VALIDATION FAILED:\n - " + "\n - ".join(errs))
         return 1

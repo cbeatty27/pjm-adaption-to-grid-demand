@@ -101,7 +101,7 @@ export function mount(root, data, us) {
   push(demandFigure(figs, { meta, demand, dm: meta.demand_us, scope: 'U.S.', series: 'respondent US48, the Lower 48 total' }));
   if (us.retail) push(retailFigure(figs, us.retail, meta));
   push(fuelFigure(figs, { meta, fuel, fm: meta.fuel_us, scope: 'U.S.', winUnits }));
-  push(additionsFigure(figs, { meta, units: us.units, winUnits, removed: us.removed, snapshot: meta.plants_us.snapshot_period, removedBaseline: us.removedBaseline, scopeNote: ' in the 50 states' }));
+  push(additionsFigure(figs, { meta, units: us.units, winUnits, removed: us.removed, snapshot: meta.plants_us.snapshot_period, removedBaseline: us.removedBaseline, scopeNote: ' in the 50 states', retired: data.retired, scopeLabel: 'us' }));
   push(dcFigure(figs, { dcs: data.dcs, dcMeta: data.dcMeta, states: null, scopeText: 'in the U.S.' }));
   return () => parts.forEach((p) => p.destroy());
 }

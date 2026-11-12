@@ -12,12 +12,21 @@ Routes used (all EIA Open Data API v2):
   electricity/rto/region-data                EIA-930 U.S. Lower 48 demand (respondent US48)
   electricity/rto/fuel-type-data             EIA-930 U.S. Lower 48 net generation by fuel (respondent US48)
   electricity/retail-sales                   EIA retail electricity sales, U.S. total, by sector (optional)
+
+Also downloaded (not an API route): EIA's monthly generator file (Form EIA-860M, XLSX) from
+https://www.eia.gov/electricity/data/eia860m/ , whose "Retired" tab lists generators that retired.
+Run only that step with:  python -m pipeline.fetch_eia --retired-only
+If the download is blocked, save the latest XLSX yourself and run
+  EIA860M_XLSX=/path/to/file.xlsx python -m pipeline.fetch_eia --retired-only
 """
 from __future__ import annotations
 
 import datetime as dt
 import gzip
+import hashlib
 import json
+import os
+import re
 import sys
 from pathlib import Path
 
@@ -148,7 +157,80 @@ def pull_retail(prov: dict) -> None:
         prov["retail_us"] = {"error": str(e)[:300]}
 
 
+EIA860M_PAGE = "https://www.eia.gov/electricity/data/eia860m/"
+MONTHS = ["january", "february", "march", "april", "may", "june", "july", "august", "september", "october", "november", "december"]
+
+
+def norm_col(c) -> str:
+    return re.sub(r"[^a-z0-9]", "", str(c).lower())
+
+
+def find_860m_url() -> str:
+    import requests
+
+    r = requests.get(EIA860M_PAGE, timeout=60, headers={"User-Agent": "Mozilla/5.0 (pjm-adaption-to-grid-demand data pipeline)"})
+    r.raise_for_status()
+    best = None
+    for href in re.findall(r'href="([^"]+_generator\d{4}\.xlsx?)"', r.text, flags=re.I):
+        m = re.search(r"/([a-z]+)_generator(\d{4})\.xlsx?$", href, flags=re.I)
+        if not m or m.group(1).lower() not in MONTHS or "/archive/" in href.lower():
+            continue
+        key = (int(m.group(2)), MONTHS.index(m.group(1).lower()))
+        if best is None or key > best[0]:
+            best = (key, href)
+    if not best:
+        raise RuntimeError("no *_generator<year>.xlsx link found on the EIA-860M page")
+    href = best[1]
+    return href if href.startswith("http") else "https://www.eia.gov" + (href if href.startswith("/") else "/electricity/data/eia860m/" + href)
+
+
+def pull_retired(prov: dict) -> None:
+    """Download the latest EIA-860M workbook and keep its 'Retired' tab. Never stops the run."""
+    try:
+        local = os.environ.get("EIA860M_XLSX", "").strip()
+        if local:
+            path, url = Path(local), f"local file {Path(local).name}"
+        else:
+            import requests
+
+            url = find_860m_url()
+            path = CACHE / "eia860m_latest.xlsx"
+            with requests.get(url, timeout=300, stream=True, headers={"User-Agent": "Mozilla/5.0 (pjm-adaption-to-grid-demand data pipeline)"}) as r:
+                r.raise_for_status()
+                with open(path, "wb") as f:
+                    for chunk in r.iter_content(1 << 20):
+                        f.write(chunk)
+        sha = hashlib.sha256(path.read_bytes()).hexdigest()
+        sheets = pd.read_excel(path, sheet_name=None, header=None, dtype=str)
+        name = next((k for k in sheets if "retired" in k.lower()), None)
+        if not name:
+            raise RuntimeError(f"no Retired sheet; sheets are {list(sheets)}")
+        raw = sheets[name]
+        hdr = next((i for i in range(min(15, len(raw))) if "plantid" in [norm_col(x) for x in raw.iloc[i]]), None)
+        if hdr is None:
+            raise RuntimeError("could not find the header row (a cell named Plant ID) in the Retired sheet")
+        df = raw.iloc[hdr + 1 :].copy()
+        df.columns = [str(x).strip() for x in raw.iloc[hdr]]
+        df = df.dropna(how="all")
+        df = df[df.iloc[:, 0].notna()].fillna("")
+        df.to_csv(CACHE / "retired_raw.csv.gz", index=False, compression="gzip")
+        prov["retired"] = {"source": url, "sheet": name, "header_row": int(hdr), "rows": int(len(df)), "columns": list(df.columns), "sha256": sha,
+                           "other_sheets": [k for k in sheets if k != name]}
+        print(f"retired tab: {len(df):,} rows from {url}; columns {list(df.columns)}")
+    except Exception as e:  # noqa: BLE001
+        print(f"WARNING: retirements download skipped: {e}", file=sys.stderr)
+        print("  Save the latest XLSX from https://www.eia.gov/electricity/data/eia860m/ and run:\n"
+              "  EIA860M_XLSX=/path/to/file.xlsx python3 -m pipeline.fetch_eia --retired-only", file=sys.stderr)
+        prov["retired"] = {"error": str(e)[:300]}
+
+
 def main() -> int:
+    if "--retired-only" in sys.argv:
+        pf = CACHE / "provenance_eia.json"
+        prov = json.loads(pf.read_text()) if pf.exists() else {"retrieved_at_utc": dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds"), "routes": {}}
+        pull_retired(prov)
+        pf.write_text(json.dumps(prov, indent=2))
+        return 0 if "error" not in prov.get("retired", {}) else 1
     prov: dict = {"retrieved_at_utc": dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds"), "routes": {}}
     pull_generators(prov, "pjm")
     pull_generators(prov, "us")
@@ -188,6 +270,7 @@ def main() -> int:
     prov["routes"]["fuel_us"] = {"route": ROUTE_FUEL, "respondent": "US48", "rows": len(fuel_us)}
 
     pull_retail(prov)
+    pull_retired(prov)
 
     (CACHE / "provenance_eia.json").write_text(json.dumps(prov, indent=2))
     print("done")

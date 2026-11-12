@@ -135,7 +135,7 @@ def build_plants(meta: dict, scope: str = "pjm") -> set[str]:
     cols = ["plant", "gen", "name", "entity", "state", "county", "sector", "status", "statusdesc", "state_cls",
             "src", "group", "pm", "mw", "msum", "mwin", "lat", "lon", "online"]
     if us:
-        cols = [k for k in cols if k not in ("msum", "mwin", "statusdesc")]
+        cols = [k for k in cols if k not in ("mwin", "statusdesc")]
         u = u.assign(lat=u["lat"].round(4), lon=u["lon"].round(4), mw=u["mw"].round(1))
         meta["status_names"] = {k: v for k, v in zip(latest[c["status"]], latest[c["statusdesc"]] if c["statusdesc"] else latest[c["status"]])}
     rows = []
@@ -367,6 +367,115 @@ def build_retail(meta: dict) -> None:
     meta["retail_us"] = {"route": "electricity/retail-sales", "first_month": out["months"][0], "last_month": out["months"][-1], "sectors": sorted(pv.columns)}
 
 
+def pid(v) -> str:
+    v = str(v).strip()
+    return v[:-2] if re.fullmatch(r"\d+\.0", v) else v
+
+
+def build_retired(meta: dict) -> None:
+    """Generators on the 'Retired' tab of EIA's monthly generator file that retired after the ChatGPT release month.
+
+    Capacity is net summer capacity as EIA lists it. A unit is flagged PJM when its plant ID appears in the PJM
+    balancing-authority snapshots pulled from the API (a plant-ID match, nothing inferred)."""
+    f = CACHE / "retired_raw.csv.gz"
+    if not f.exists() or "error" in meta.get("retired", {}) or "retired" not in meta:
+        print("retirements not in the cache; skipping retired.json (run: python3 -m pipeline.fetch_eia --retired-only)")
+        return
+    df = read("retired_raw.csv.gz")
+    c = resolve(
+        df, plant=["plantid"], gen=["generatorid"], name=["plantname"], state=["plantstate", "stateid", "state"],
+        src=["energysourcecode", "energysource1"], msum=["netsummercapacitymw"], mw=["nameplatecapacitymw"],
+        om=["operatingmonth"], oy=["operatingyear"], rm=["retirementmonth"], ry=["retirementyear"],
+        lat=["latitude"], lon=["longitude"],
+    )
+    need = ["plant", "gen", "src", "rm", "ry"]
+    if not all(c[k] for k in need) or not (c["msum"] or c["mw"]):
+        print(f"retired tab columns not recognised ({list(df.columns)}); skipping retired.json")
+        meta["retired"]["skipped"] = f"columns not recognised: {list(df.columns)}"
+        return
+    basis_col = c["msum"] or c["mw"]
+    basis = "net summer capacity" if c["msum"] else "nameplate capacity"
+    num = lambda col: pd.to_numeric(df[col], errors="coerce") if col else pd.Series(np.nan, index=df.index)  # noqa: E731
+    ret = (df[c["ry"]].astype(str).str.replace(r"\.0$", "", regex=True).str.strip() + "-"
+           + df[c["rm"]].astype(str).str.replace(r"\.0$", "", regex=True).str.strip().str.zfill(2))
+    ret = ret.where(ret.str.fullmatch(r"\d{4}-\d{2}"))
+    onl = pd.Series(None, index=df.index, dtype=object)
+    if c["oy"] and c["om"]:
+        o = (df[c["oy"]].astype(str).str.replace(r"\.0$", "", regex=True).str.strip() + "-"
+             + df[c["om"]].astype(str).str.replace(r"\.0$", "", regex=True).str.strip().str.zfill(2))
+        onl = o.where(o.str.fullmatch(r"\d{4}-\d{2}"))
+    latest_period = meta["plants_us"]["snapshot_period"] if "plants_us" in meta else meta["plants"]["snapshot_period"]
+    t = pd.DataFrame({
+        "plant": df[c["plant"]].map(pid), "gen": df[c["gen"]].astype(str).str.strip(),
+        "name": df[c["name"]] if c["name"] else "", "state": df[c["state"]] if c["state"] else "",
+        "src": df[c["src"]].astype(str).str.strip(), "mw": num(basis_col), "ret": ret, "online": onl,
+        "lat": num(c["lat"]), "lon": num(c["lon"]),
+    })
+    t["group"] = t["src"].map(lambda s: G.GEN_SOURCE.get(s, "other"))
+    in_tab = int(len(t))
+    after_release = t[t["ret"].notna() & (t["ret"] > WINDOW_START[:7])]
+    kept = after_release[after_release["ret"] <= latest_period].copy()
+    beyond = int(len(after_release) - len(kept))
+
+    # plant IDs that report PJM as their balancing authority in the API snapshots
+    pjm_ids: set[str] = set()
+    for nm in ("generators_baseline.csv.gz", "generators_latest.csv.gz"):
+        if (CACHE / nm).exists():
+            d = read(nm)
+            col = resolve(d, plant=["plantid"])["plant"]
+            if col:
+                pjm_ids |= {pid(x) for x in d[col]}
+    kept["pjm"] = kept["plant"].isin(pjm_ids)
+
+    # coordinates: the tab's own when present, else the plant's coordinates in the baseline snapshot
+    base_us = CACHE / "generators_us_baseline.csv.gz"
+    bsrc = read("generators_us_baseline.csv.gz") if base_us.exists() else read("generators_baseline.csv.gz")
+    bc = resolve(bsrc, plant=["plantid"], lat=["latitude"], lon=["longitude"])
+    coords = {}
+    if bc["plant"] and bc["lat"] and bc["lon"]:
+        b2 = bsrc[[bc["plant"], bc["lat"], bc["lon"]]].copy()
+        b2[bc["lat"]] = pd.to_numeric(b2[bc["lat"]], errors="coerce"); b2[bc["lon"]] = pd.to_numeric(b2[bc["lon"]], errors="coerce")
+        b2 = b2.dropna().drop_duplicates(bc["plant"])
+        coords = {pid(p): (la, lo) for p, la, lo in zip(b2[bc["plant"]], b2[bc["lat"]], b2[bc["lon"]])}
+    from_tab = int(kept[["lat", "lon"]].notna().all(axis=1).sum())
+    for i, r in kept.iterrows():
+        if pd.isna(r["lat"]) or pd.isna(r["lon"]):
+            la_lo = coords.get(r["plant"])
+            if la_lo:
+                kept.at[i, "lat"], kept.at[i, "lon"] = la_lo
+    no_xy = int(kept[["lat", "lon"]].isna().any(axis=1).sum())
+
+    # cross-check against units that left the API's operating inventory between the two snapshots
+    xc = {}
+    for scope, pre in (("pjm", "generators"), ("us", "generators_us")):
+        if not (CACHE / f"{pre}_latest.csv.gz").exists():
+            continue
+        lat_, bas_ = read(f"{pre}_latest.csv.gz"), read(f"{pre}_baseline.csv.gz")
+        k = resolve(bas_, plant=["plantid"], gen=["generatorid"], mw=["nameplatecapacitymw"])
+        lk = {(pid(a), str(b).strip()) for a, b in zip(lat_[k["plant"]], lat_[k["gen"]])}
+        gone = [(pid(a), str(b).strip(), float(m or 0)) for a, b, m in zip(bas_[k["plant"]], bas_[k["gen"]], bas_[k["mw"]]) if (pid(a), str(b).strip()) not in lk]
+        rk = set(zip(kept["plant"], kept["gen"]))
+        hit = [g for g in gone if (g[0], g[1]) in rk]
+        xc[scope] = {"left_inventory_units": len(gone), "of_which_on_retired_tab": len(hit),
+                     "left_inventory_not_on_retired_tab_units": len(gone) - len(hit),
+                     "left_inventory_not_on_retired_tab_nameplate_mw": round(sum(g[2] for g in gone if (g[0], g[1]) not in rk), 1)}
+
+    cols = ["plant", "gen", "name", "state", "src", "group", "mw", "ret", "online", "lat", "lon", "pjm"]
+    rows = []
+    for r in kept[cols].itertuples(index=False):
+        rows.append([None if (isinstance(x, float) and np.isnan(x)) else (bool(x) if isinstance(x, (np.bool_, bool)) else (round(float(x), 4) if isinstance(x, (float, np.floating)) else x)) for x in r])
+    (OUT / "retired.json").write_text(json.dumps({"columns": cols, "rows": rows}, separators=(",", ":")))
+    meta["retired"].update({
+        "capacity_basis": basis, "capacity_column": basis_col, "rows_on_tab": in_tab,
+        "rows_after_release_month": int(len(after_release)), "rows_kept": int(len(kept)),
+        "rows_after_snapshot_period_excluded": beyond, "pjm_rows": int(kept["pjm"].sum()),
+        "coordinates_from_tab": from_tab, "rows_without_coordinates": no_xy,
+        "retirement_months": [str(kept["ret"].min()), str(kept["ret"].max())] if len(kept) else [],
+        "pjm_rule": "plant ID appears in the PJM balancing-authority snapshots from the generator-inventory API route",
+        "crosscheck": xc,
+    })
+
+
 def main() -> int:
     OUT.mkdir(parents=True, exist_ok=True)
     meta = json.loads((CACHE / "provenance_eia.json").read_text())
@@ -381,6 +490,7 @@ def main() -> int:
         build_retail(meta)
     else:
         print("U.S. pulls not in the cache; building PJM files only. Run fetch_eia again to add the U.S. tabs.")
+    build_retired(meta)
     dc = json.loads((OUT / "datacenters.json").read_text())["meta"]
     meta.update({
         "built_at_utc": dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds"),

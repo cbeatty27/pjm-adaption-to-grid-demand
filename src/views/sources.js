@@ -17,7 +17,7 @@ export function mount(root, { meta, dcMeta }) {
   root.innerHTML = `<div class="doc">
     <div class="doc__intro">
       <h2>Sources and method</h2>
-      <p>Two datasets drive everything on this site: the U.S. Energy Information Administration (EIA) and the IM3 Open Source Data Center Atlas. Nothing else supplies data. Each source below says exactly what was taken and how it was used, so you can check it independently.</p>
+      <p>Two organizations supply the data on this site: the U.S. Energy Information Administration (EIA) and the IM3 Open Source Data Center Atlas. Nothing else supplies data. Each source below says exactly what was taken and how it was used, so you can check it independently.</p>
     </div>
 
     <section class="src"><h3>1. EIA Open Data API, generator inventory</h3><dl>
@@ -41,6 +41,15 @@ export function mount(root, { meta, dcMeta }) {
       ${row('Why not PJM directly', 'PJM\'s own Data Miner service was not used. PJM figures here are PJM\'s reports to EIA.')}
     </dl></section>
 
+    ${meta.retired?.rows_kept != null ? `<section class="src"><h3>EIA-860M monthly generator file, Retired tab</h3><dl>
+      ${row('What it is', 'The same Form EIA-860M inventory as source 1, published as a monthly Excel file. Its Retired tab lists generators that have retired, with their retirement month. The API route in source 1 lists only generators that are operating, so it cannot show retirements.')}
+      ${row('How obtained', `The pipeline reads the file linked from <a href="https://www.eia.gov/electricity/data/eia860m/">eia.gov/electricity/data/eia860m</a> (${esc(String(meta.retired.source || ''))}), keeps the Retired sheet, and records its SHA-256 (<code>${esc(String(meta.retired.sha256 || '').slice(0, 16))}…</code>). It is a direct file download, not an API call.`)}
+      ${row('Fields used', `Plant ID, generator ID, plant name, state, energy source code, ${esc(meta.retired.capacity_basis || 'capacity')} (column <code>${esc(meta.retired.capacity_column || '')}</code>), operating month and year, retirement month and year, and latitude and longitude where the tab gives them (otherwise the plant's coordinates from the generator inventory).`)}
+      ${row('How it is used', `Units whose retirement month is after November 2022 and not after the generator snapshot month (${nf0.format(meta.retired.rows_kept)} units; ${nf0.format(meta.retired.rows_after_snapshot_period_excluded ?? 0)} later ones left out) are shown as hollow rings on the maps and as negative bars in the added-and-retired chart. The comparison with additions uses ${esc(meta.retired.capacity_basis || 'capacity')} for both sides.`)}
+      ${row('PJM subset', `A retired unit is counted as PJM when its plant ID appears in the PJM balancing-authority snapshots pulled from the API (${nf0.format(meta.retired.pjm_rows ?? 0)} units). That is an ID match. It does not decide who the unit served.`)}
+      ${row('Cross-check', 'Units that left the operating inventory between the two API snapshots but are not on the Retired tab are reported separately and not counted as retirements, because they may have been reclassified or renumbered.')}
+    </dl></section>` : ''}
+
     ${US ? `<section class="src"><h3>3. EIA Open Data API, retail electricity sales</h3><dl>
       ${row('What it is', 'Electricity sold to customers by sector, from EIA\'s monthly electric power survey (Form EIA-861M).')}
       ${row('Route', '<code>electricity/retail-sales</code>, U.S. total (state id US), sectors residential, commercial, industrial, transportation and other where EIA reports them. Unit: million kilowatt-hours (GWh), shown as TWh.')}
@@ -63,7 +72,7 @@ export function mount(root, { meta, dcMeta }) {
       <li><strong>Basemap tiles:</strong> OpenFreeMap vector tiles (OpenMapTiles, data from OpenStreetMap), loaded in your browser for the map background only. OpenFreeMap states its public service is free, needs no API key and is provided as-is. Attribution is shown on the map.</li>
       <li><strong>Software, bundled into the site:</strong> MapLibre GL JS (map), Chart.js (charts), Vite (build), Instrument Sans via Fontsource. Python with pandas and requests runs the data pipeline.</li>
       <li><strong>Hosting and automation:</strong> GitHub Pages and GitHub Actions. The EIA API key is stored as an Actions secret and appears nowhere in the code or the site.</li>
-      <li><strong>Documentation read to learn field names, not used as data:</strong> EIA's API documentation and the OSTI record for the IM3 atlas.</li>
+      <li><strong>Documentation read to learn field names, not used as data:</strong> EIA's API documentation, EIA's description of the EIA-860M workbook tabs, and the OSTI record for the IM3 atlas.</li>
     </ul>
 
     <h2 class="sec">Fuel groups</h2>
@@ -85,7 +94,7 @@ export function mount(root, { meta, dcMeta }) {
     </ul>
 
     <h2 class="sec">Reproduce it</h2>
-    <p>The repository holds the pipeline and the processed data. With your own EIA API key: <code>EIA_API_KEY=… python -m pipeline.fetch_eia</code>, then <code>python -m pipeline.build_datacenters</code> and <code>python -m pipeline.build_site_data</code>. A scheduled GitHub Action does this and redeploys the site.</p>
+    <p>The repository holds the pipeline and the processed data. With your own EIA API key: <code>EIA_API_KEY=… python -m pipeline.fetch_eia</code> (which also downloads the EIA-860M workbook for retirements), then <code>python -m pipeline.build_datacenters</code> and <code>python -m pipeline.build_site_data</code>. A scheduled GitHub Action does this and redeploys the site.</p>
     <p class="side__fine">Built ${esc(meta.built_at_utc || '')}. Generator snapshot ${esc(p.snapshot_period ? ymLabel(p.snapshot_period) : 'n/a')}.</p>
   </div>`;
 }

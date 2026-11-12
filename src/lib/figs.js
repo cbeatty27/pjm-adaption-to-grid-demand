@@ -435,36 +435,99 @@ export function fuelFigure(host, { meta, fuel, fm, scope, winUnits }) {
 }
 
 // ---------------------------------------------------------------- generator additions by quarter
-export function additionsFigure(host, { meta, units, winUnits, removed, snapshot, removedBaseline, scopeNote }) {
+export function additionsFigure(host, { meta, units, winUnits, removed, snapshot, removedBaseline, scopeNote, retired, scopeLabel }) {
   const groups = meta.groups;
   const gl = Object.fromEntries(groups.map((g) => [g.key, g.label]));
   const lastIdx = ymIndex(snapshot);
   const startIdx = ymIndex('2019-01');
-  const ops = units.filter((u) => u.state_cls === 'operating' && u.online && ymIndex(u.online) >= startIdx && ymIndex(u.online) <= lastIdx);
+  const useNet = !!retired && meta.retired?.capacity_basis === 'net summer capacity' && units.some((u) => u.msum != null);
+  const mwOf = (u) => (useNet ? u.msum : u.mw) || 0;
   const q = (ym) => { const [y, m] = ym.split('-').map(Number); return `${y} Q${Math.ceil(m / 3)}`; };
   const qs = []; for (let y = 2019; y <= Math.floor(lastIdx / 12); y++) for (let k = 1; k <= 4; k++) { if (y * 12 + (k - 1) * 3 <= lastIdx) qs.push(`${y} Q${k}`); }
-  const by = Object.fromEntries(groups.map((g) => [g.key, Object.fromEntries(qs.map((x) => [x, 0]))]));
-  ops.forEach((u) => { const k = q(u.online); if (by[u.group] && k in by[u.group]) by[u.group][k] += u.mw || 0; });
-  const winMw = Object.fromEntries(groups.map((g) => [g.key, sum(winUnits.filter((u) => u.group === g.key).map((u) => u.mw))]));
-  const addedMw = sum(Object.values(winMw));
-  const top = groups.map((g) => g.key).sort((a, c) => winMw[c] - winMw[a])[0];
-  const remMw = Object.fromEntries(groups.map((g) => [g.key, removed.mw[g.key] || 0]));
-  return simple(host, {
-    title: `${gl[top]} is the largest block of new generator capacity since December 2022: ${nf0.format(winMw[top])} MW of ${nf0.format(addedMw)} MW`,
-    note: 'Nameplate MW of EIA operating generators' + (scopeNote || '') + ', by the quarter they reached operation. Nameplate is the maximum rating, not what a unit produced.',
-    legend: groups.map((g) => `<span><i style="background:${FUEL_COLOR[g.key]}"></i>${esc(g.label)}</span>`).join(''),
-    foot: `Source: EIA Open Data API, route <code>electricity/operating-generator-capacity</code> (EIA-860M), snapshot ${esc(snapshot)}. Units absent from the latest snapshot but present in the ${esc(removedBaseline)} snapshot (${nf0.format(removed.n)} units, ${nf0.format(sum(Object.values(remMw)))} MW) are not netted out here; they may be retired or reclassified.`,
-    tableHtml: table(['Fuel', 'MW online since Dec 2022', 'MW listed in baseline snapshot but not latest'], groups.map((g) => [g.label, nf0.format(winMw[g.key]), nf0.format(remMw[g.key])])),
+  const zero = () => Object.fromEntries(groups.map((g) => [g.key, Object.fromEntries(qs.map((x) => [x, 0]))]));
+  const by = zero(), byRet = zero();
+  units.filter((u) => u.state_cls === 'operating' && u.online && ymIndex(u.online) >= startIdx && ymIndex(u.online) <= lastIdx)
+    .forEach((u) => { const k = q(u.online); if (by[u.group] && k in by[u.group]) by[u.group][k] += mwOf(u); });
+  (retired || []).filter((r) => r.ret && ymIndex(r.ret) >= startIdx && ymIndex(r.ret) <= lastIdx)
+    .forEach((r) => { const k = q(r.ret); if (byRet[r.group] && k in byRet[r.group]) byRet[r.group][k] += r.mw || 0; });
+  const addMw = Object.fromEntries(groups.map((g) => [g.key, sum(winUnits.filter((u) => u.group === g.key).map(mwOf))]));
+  const retMw = Object.fromEntries(groups.map((g) => [g.key, sum((retired || []).filter((r) => r.group === g.key).map((r) => r.mw))]));
+  const added = sum(Object.values(addMw)), gone = sum(Object.values(retMw));
+  const legend = groups.map((g) => `<span><i style="background:${FUEL_COLOR[g.key]}"></i>${esc(g.label)}</span>`).join('');
+  const basisTxt = useNet ? 'net summer capacity' : 'nameplate capacity';
+
+  if (!retired) {
+    const top = groups.map((g) => g.key).sort((a, c) => addMw[c] - addMw[a])[0];
+    const remMw = removed.mw;
+    return simple(host, {
+      title: `${gl[top]} is the largest block of new generator capacity since December 2022: ${nf0.format(addMw[top])} MW of ${nf0.format(added)} MW`,
+      note: 'Nameplate MW of EIA operating generators' + (scopeNote || '') + ', by the quarter they reached operation. Nameplate is the maximum rating, not what a unit produced.',
+      legend,
+      foot: `Source: EIA Open Data API, route <code>electricity/operating-generator-capacity</code> (EIA-860M), snapshot ${esc(snapshot)}. Units absent from the latest snapshot but present in the ${esc(removedBaseline)} snapshot (${nf0.format(removed.n)} units, ${nf0.format(sum(Object.values(remMw)))} MW) are not netted out here; they may be retired or reclassified.`,
+      tableHtml: table(['Fuel', 'MW online since Dec 2022', 'MW listed in baseline snapshot but not latest'], groups.map((g) => [g.label, nf0.format(addMw[g.key]), nf0.format(remMw[g.key] || 0)])),
+      draw: (cv) => new Chart(cv, {
+        type: 'bar',
+        data: { labels: qs, datasets: groups.map((g) => ({ label: g.label, data: qs.map((x) => by[g.key][x]), backgroundColor: FUEL_COLOR[g.key], borderColor: '#ffffff', borderWidth: 1, borderRadius: 2, stack: 's' })) },
+        options: {
+          maintainAspectRatio: false, interaction: { mode: 'index', intersect: false },
+          plugins: { legend: { display: false }, tooltip: { itemSort: (a, c) => c.datasetIndex - a.datasetIndex, filter: (it) => it.parsed.y > 0, callbacks: { label: (c) => `${c.dataset.label}: ${nf0.format(c.parsed.y)} MW` } } },
+          scales: { x: { stacked: true, grid: { display: false }, ticks: { autoSkip: false, maxRotation: 0, callback(v) { const t = qs[v]; return t.endsWith('Q1') ? t.slice(0, 4) : ''; } } }, y: { stacked: true, grid: { color: GRID }, title: { display: true, text: 'MW (nameplate)' }, ticks: { callback: (v) => nf0.format(v) } } },
+        },
+        plugins: [releaseMarker(qs, '2022 Q4')],
+      }),
+    });
+  }
+
+  const net = added - gone;
+  const rows = groups.map((g) => ({ k: g.key, a: addMw[g.key], r: retMw[g.key], n: addMw[g.key] - retMw[g.key] })).sort((x, y) => y.n - x.n);
+  const gasRow = rows.find((r) => r.k === 'gas');
+  const xc = meta.retired?.crosscheck?.[scopeLabel] || null;
+  const title = `${scopeLabel === 'pjm' ? 'PJM' : 'U.S.'} generators added ${nf0.format(added)} MW and retired ${nf0.format(gone)} MW since December 2022, a net ${net >= 0 ? '+' : '−'}${nf0.format(Math.abs(net))} MW`;
+  const callout = `<b>Net by fuel.</b> `
+    + rows.filter((r) => r.a || r.r).slice().sort((x, y) => Math.abs(y.n) - Math.abs(x.n)).slice(0, 4).map((r) => `${gl[r.k]} ${r.n >= 0 ? '+' : '−'}${nf0.format(Math.abs(r.n))} MW (${nf0.format(r.a)} added, ${nf0.format(r.r)} retired)`).join('; ')
+    + `. Capacity is ${basisTxt}. Added and retired capacity say what is installed, not how much any unit ran.`;
+  const v1 = {
+    id: 'quarter', label: 'Added and retired by quarter', height: 400,
+    note: `${esc(basisTxt[0].toUpperCase() + basisTxt.slice(1))} of generators${scopeNote || ''} by the quarter they reached operation (above zero) or retired (below zero). EIA lists retirements by month; operating months come from the generator inventory.`,
+    legend,
     draw: (cv) => new Chart(cv, {
       type: 'bar',
-      data: { labels: qs, datasets: groups.map((g) => ({ label: g.label, data: qs.map((x) => by[g.key][x]), backgroundColor: FUEL_COLOR[g.key], borderColor: '#ffffff', borderWidth: 1, borderRadius: 2, stack: 's' })) },
+      data: { labels: qs, datasets: groups.map((g) => ({ label: g.label, data: qs.map((x) => by[g.key][x]), backgroundColor: FUEL_COLOR[g.key], borderColor: '#ffffff', borderWidth: 1, borderRadius: 2, stack: 's' }))
+        .concat(groups.map((g) => ({ label: `${g.label} retired`, data: qs.map((x) => -byRet[g.key][x]), backgroundColor: FUEL_COLOR[g.key], borderColor: '#ffffff', borderWidth: 1, borderRadius: 2, stack: 's' }))) },
       options: {
         maintainAspectRatio: false, interaction: { mode: 'index', intersect: false },
-        plugins: { legend: { display: false }, tooltip: { itemSort: (a, c) => c.datasetIndex - a.datasetIndex, filter: (it) => it.parsed.y > 0, callbacks: { label: (c) => `${c.dataset.label}: ${nf0.format(c.parsed.y)} MW` } } },
-        scales: { x: { stacked: true, grid: { display: false }, ticks: { autoSkip: false, maxRotation: 0, callback(v) { const t = qs[v]; return t.endsWith('Q1') ? t.slice(0, 4) : ''; } } }, y: { stacked: true, grid: { color: GRID }, title: { display: true, text: 'MW (nameplate)' }, ticks: { callback: (v) => nf0.format(v) } } },
+        plugins: { legend: { display: false }, tooltip: { filter: (it) => it.parsed.y !== 0, callbacks: { label: (c) => `${c.dataset.label}: ${nf0.format(Math.abs(c.parsed.y))} MW` } } },
+        scales: { x: { stacked: true, grid: { display: false }, ticks: { autoSkip: false, maxRotation: 0, callback(v) { const t = qs[v]; return t.endsWith('Q1') ? t.slice(0, 4) : ''; } } }, y: { stacked: true, grid: { color: GRID }, title: { display: true, text: `MW (${useNet ? 'net summer' : 'nameplate'})` }, ticks: { callback: (v) => (v < 0 ? `−${nf0.format(-v)}` : nf0.format(v)) } } },
       },
       plugins: [releaseMarker(qs, '2022 Q4')],
     }),
+  };
+  const v2 = {
+    id: 'net', label: 'Net change by fuel', height: 360,
+    note: `Capacity added minus capacity retired since December 2022, by fuel, in MW (${basisTxt}). The last bar is all fuels.`,
+    legend: legend + `<span><i style="background:${INK}"></i>All fuels</span>`,
+    draw: (cv) => {
+      const all = rows.concat([{ k: 'all', a: added, r: gone, n: net }]);
+      return new Chart(cv, {
+        type: 'bar',
+        data: { labels: all.map((r) => (r.k === 'all' ? 'All fuels' : gl[r.k])), datasets: [{ data: all.map((r) => r.n), backgroundColor: all.map((r) => (r.k === 'all' ? INK : FUEL_COLOR[r.k])), borderRadius: 5, barThickness: 24 }] },
+        options: {
+          indexAxis: 'y', maintainAspectRatio: false, layout: { padding: { right: 24 } },
+          plugins: { legend: { display: false }, tooltip: { callbacks: { label: (c) => { const r = all[c.dataIndex]; return [`Net ${r.n >= 0 ? '+' : '−'}${nf0.format(Math.abs(r.n))} MW`, `${nf0.format(r.a)} added, ${nf0.format(r.r)} retired`]; } } } },
+          scales: { x: { grace: '25%', grid: { color: GRID }, title: { display: true, text: 'Net change in capacity (MW)' }, ticks: { callback: (v) => nf0.format(v) } }, y: { grid: { display: false } } },
+        },
+        plugins: [barEndLabels((i, v) => `${v >= 0 ? '+' : '−'}${nf0.format(Math.abs(v))} MW`)],
+      });
+    },
+  };
+  const v3 = {
+    id: 'table', label: 'Table',
+    table: table(['Fuel', 'MW added since Dec 2022', 'MW retired since Dec 2022', 'Net MW'], rows.map((r) => [gl[r.k], nf0.format(r.a), nf0.format(r.r), `${r.n >= 0 ? '+' : '−'}${nf0.format(Math.abs(r.n))}`]).concat([['All fuels', nf0.format(added), nf0.format(gone), `${net >= 0 ? '+' : '−'}${nf0.format(Math.abs(net))}`]])),
+  };
+  const rm = meta.retired;
+  return figure(host, {
+    title, callout, views: [v1, v2, v3],
+    foot: `Sources: EIA Open Data API, route <code>electricity/operating-generator-capacity</code> (EIA-860M), snapshot ${esc(snapshot)}, for additions; the "Retired" tab of EIA's monthly generator file (Form EIA-860M), for retirements dated ${esc(ymLabel(rm.retirement_months[0]))} to ${esc(ymLabel(rm.retirement_months[1]))}.${scopeLabel === 'pjm' ? ' A retired unit counts as PJM when its plant ID is in the PJM snapshots from the API.' : ''} ${xc ? `Between the ${esc(removedBaseline)} and ${esc(snapshot)} snapshots, ${nf0.format(xc.left_inventory_units)} units left the operating inventory; ${nf0.format(xc.of_which_on_retired_tab)} of them are on the Retired tab and ${nf0.format(xc.left_inventory_not_on_retired_tab_units)} (${nf0.format(xc.left_inventory_not_on_retired_tab_nameplate_mw)} MW nameplate) are not, so they may have been reclassified or renumbered and are not counted as retirements here.` : ''}`,
   });
 }
 
