@@ -52,10 +52,10 @@ button { font: inherit; color: inherit; }
 }
 .titleblock__name { padding: 10px 24px; display: flex; flex-direction: column; justify-content: center; min-width: 0; }
 .titleblock__name h1 { font-size: 22px; line-height: 1.15; font-weight: 700; }
-.titleblock__name p { margin: 2px 0 0; color: var(--ink-3); font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.titleblock__name p { margin: 2px 0 0; color: var(--ink-3); font-size: 13px; line-height: 1.3; }
 .tabs { display: flex; gap: 4px; padding: 4px; background: var(--paper); border-radius: 999px; }
 .tabs a {
-  display: flex; align-items: center; padding: 7px 16px; text-decoration: none; color: var(--ink-2);
+  display: flex; align-items: center; padding: 7px 13px; text-decoration: none; color: var(--ink-2);
   font-weight: 500; font-size: 14px; border-radius: 999px; transition: background .15s, color .15s;
 }
 .tabs a:hover { color: var(--ink); background: rgba(255, 255, 255, .6); }
@@ -182,9 +182,11 @@ main { flex: 1; min-height: 0; outline: none; }
 .pop td:first-child { color: var(--ink-3); white-space: nowrap; }
 .pop .fine { color: var(--ink-3); font-size: 11.5px; margin-top: 6px; max-width: 280px; }
 
+@media (max-width: 1560px) {
+  .titleblock__vintage { display: none; }
+}
 @media (max-width: 1000px) {
   .titleblock { grid-template-columns: 1fr; padding: 0 0 10px; }
-  .titleblock__name p { white-space: normal; }
   .tabs { margin: 0 16px; overflow-x: auto; }
   .titleblock__vintage { display: none; }
   .mapview { grid-template-columns: 1fr; grid-template-rows: 56vh auto auto; height: auto; min-height: 0; }

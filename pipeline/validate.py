@@ -40,6 +40,26 @@ def main() -> int:
         errs.append(f"latest 12-month PJM generation {total/1000:.0f} TWh outside 400-1200 TWh")
     if gs.get("gas", 0) <= 0:
         errs.append("no natural gas generation found")
+    if meta.get("has_us"):
+        us_plants = json.loads((OUT / "plants_us.json").read_text())
+        us_dem = json.loads((OUT / "demand_us.json").read_text())
+        us_fuel = json.loads((OUT / "fuelmix_us.json").read_text())
+        if len(us_plants["units"]) < 5000:
+            errs.append(f"only {len(us_plants['units'])} U.S. generator units")
+        ucols = us_plants["columns"]
+        uon = [r[ucols.index("online")] for r in us_plants["units"] if r[ucols.index("state_cls")] == "operating"]
+        if sum(1 for o in uon if o and o >= "2022-12") < 500:
+            errs.append("fewer than 500 U.S. operating units dated Dec 2022 or later")
+        um = us_dem["monthly"]
+        ugood = [a for a, c in zip(um["avg_mw"], um["coverage"]) if c >= 0.95]
+        if not ugood or not all(250_000 < a < 800_000 for a in ugood):
+            errs.append("U.S. monthly average demand outside 250-800 GW")
+        if max(p for p in um["peak_mw"] if p is not None) > 1_000_000:
+            errs.append("a U.S. monthly peak above 1,000 GW survived cleaning")
+        ug = us_fuel["comparison"]["latest"]["gwh"]
+        utot = sum(v for k, v in ug.items() if k != "storage")
+        if not 2_500_000 < utot < 6_000_000:
+            errs.append(f"latest 12-month U.S. generation {utot/1000:.0f} TWh outside 2500-6000 TWh")
     if errs:
         print("VALIDATION FAILED:\n - " + "\n - ".join(errs))
         return 1

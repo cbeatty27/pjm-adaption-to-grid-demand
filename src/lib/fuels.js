@@ -15,3 +15,6 @@ export const TIME = {
 };
 
 export const fuelLabel = (meta) => Object.fromEntries(meta.groups.map((g) => [g.key, g.label]));
+
+// Retail-sales sectors (EIA sector ids). Validated as a four-slot categorical set on the light surface.
+export const SECTOR_COLOR = { RES: '#009b95', COM: '#7b69c6', IND: '#dea143', TRA: '#da6a76', OTH: '#a3b0ba' };
