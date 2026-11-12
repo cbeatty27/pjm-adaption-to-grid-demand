@@ -1,5 +1,5 @@
 {
-  "retrieved_at_utc": "2026-11-12T00:37:26+00:00",
+  "retrieved_at_utc": "2026-11-12T01:38:27+00:00",
   "routes": {
     "demand": {
       "route": "electricity/rto/region-data",
@@ -123,78 +123,102 @@
       "TRA"
     ]
   },
-  "retired": {
-    "source": "local file september_generator2026.xlsx",
-    "sheet": "Retired",
-    "header_row": 2,
-    "rows": 7322,
+  "gen923_us": {
+    "route": "electricity/electric-power-operational-data",
+    "rows": 1120,
     "columns": [
-      "Entity ID",
-      "Entity Name",
-      "Plant ID",
-      "Plant Name",
-      "Google Map",
-      "Bing Map",
-      "Plant State",
-      "County",
-      "Balancing Authority Code",
-      "Sector",
-      "Generator ID",
-      "Unit Code",
-      "Nameplate Capacity (MW)",
-      "Net Summer Capacity (MW)",
-      "Net Winter Capacity (MW)",
-      "Technology",
-      "Energy Source Code",
-      "Prime Mover Code",
-      "Operating Month",
-      "Operating Year",
-      "Retirement Month",
-      "Retirement Year",
-      "Nameplate Energy Capacity (MWh)",
-      "DC Net Capacity (MW)",
-      "Latitude",
-      "Longitude"
+      "period",
+      "location",
+      "stateDescription",
+      "sectorid",
+      "sectorDescription",
+      "fueltypeid",
+      "fuelTypeDescription",
+      "generation",
+      "generation-units"
     ],
-    "sha256": "bcef74e1af991680731aeecfda967f5950db4ce739bb584edd8b8774c7e6da17",
-    "other_sheets": [
-      "Operating",
-      "Planned",
-      "Canceled or Postponed",
-      "Operating_PR",
-      "Planned_PR",
-      "Retired_PR"
+    "fuel_ids_requested": [
+      "ALL",
+      "COL",
+      "NG",
+      "NUC",
+      "HYC",
+      "HPS",
+      "SUN",
+      "WND"
     ],
-    "capacity_basis": "net summer capacity",
-    "capacity_column": "Net Summer Capacity (MW)",
-    "rows_on_tab": 7322,
-    "rows_after_release_month": 1118,
-    "rows_kept": 1115,
-    "rows_after_snapshot_period_excluded": 3,
-    "pjm_rows": 260,
-    "coordinates_from_tab": 1115,
-    "rows_without_coordinates": 0,
-    "retirement_months": [
-      "2022-12",
-      "2026-08"
+    "fuel_ids_listed_by_route": {
+      "SPV": "solar photovoltaic",
+      "ALL": "all fuels",
+      "LIG": "lignite coal",
+      "RC": "refined coal",
+      "WAS": "renewable waste products",
+      "BIT": "bituminous coal",
+      "STH": "solar thermal",
+      "OTH": "other",
+      "PET": "petroleum",
+      "REN": "renewable",
+      "TPV": "estimated total solar photovoltaic",
+      "TSN": "estimated total solar",
+      "COW": "all coal products",
+      "HPS": "hydro-electric pumped storage",
+      "OB2": "biomass",
+      "LFG": "landfill gas",
+      "MLG": "municiapl landfill gas",
+      "ORW": "other renewables",
+      "WND": "wind",
+      "DPV": "estimated small scale solar photovoltaic",
+      "NUC": "nuclear",
+      "WNT": "onshore wind turbine",
+      "WNS": "offshore wind turbine",
+      "ANT": "anthracite coal",
+      "SUB": "subbituminous coal",
+      "BIO": "biomass",
+      "PC": "petroleum coke",
+      "WOC": "waste coal",
+      "NGO": "natural gas & other gases",
+      "PEL": "petroleum liquids",
+      "RFO": "residual fuel oil",
+      "SUN": "solar",
+      "OOG": "other gases",
+      "GEO": "geothermal",
+      "MSB": "biogenic municipal solid waste",
+      "HYC": "conventional hydroelectric",
+      "AOR": "all renewables",
+      "BIS": "bituminous coal and synthetic coal",
+      "WWW": "wood and wood wastes",
+      "WOO": "waste oil and other oils",
+      "NG": "natural gas",
+      "OBW": "biomass",
+      "FOS": "fossil fuels",
+      "COL": "coal, excluding waste coal",
+      "DFO": "distillate fuel oil"
+    },
+    "first_month": "2015-01",
+    "last_month": "2026-08",
+    "fuel_ids_used": [
+      "COL",
+      "HPS",
+      "HYC",
+      "NG",
+      "NUC",
+      "SUN",
+      "WND"
     ],
-    "pjm_rule": "balancing authority code PJM on the Retired tab; where the code is blank, plant ID found in the PJM snapshots from the generator-inventory API route",
-    "pjm_rows_by_ba_code": 260,
-    "pjm_rows_by_plant_id": 0,
-    "crosscheck": {
-      "pjm": {
-        "left_inventory_units": 274,
-        "of_which_on_retired_tab": 254,
-        "left_inventory_not_on_retired_tab_units": 20,
-        "left_inventory_not_on_retired_tab_nameplate_mw": 1239.1
-      },
-      "us": {
-        "left_inventory_units": 1277,
-        "of_which_on_retired_tab": 1102,
-        "left_inventory_not_on_retired_tab_units": 175,
-        "left_inventory_not_on_retired_tab_nameplate_mw": 3276.2
-      }
-    }
+    "fuel_names": {
+      "ALL": "all fuels",
+      "COL": "coal, excluding waste coal",
+      "HPS": "hydro-electric pumped storage",
+      "HYC": "conventional hydroelectric",
+      "NG": "natural gas",
+      "NUC": "nuclear",
+      "SUN": "solar",
+      "WND": "wind"
+    },
+    "other_is": "all-fuels total minus the fuels listed (oil, biomass, geothermal, waste and any other)"
+  },
+  "retired": {
+    "error": "eia860m_latest.xlsx is not an Excel file (starts with b'<!doctyp'); EIA probably refused the scripted download"
   },
   "plants": {
     "snapshot_period": "2026-08",
@@ -409,6 +433,8 @@
       "PS",
       "RECO"
     ],
+    "daily_min_hours": 20,
+    "days_in_daily_series": 2866,
     "partial_months": [
       "2018-12",
       "2026-11"
@@ -418,8 +444,123 @@
     "min_coverage": 0.95,
     "hourly_rows": 550287,
     "codes_unmapped": [],
+    "code_names": {
+      "COL": "Coal",
+      "NG": "Natural Gas",
+      "NUC": "Nuclear",
+      "OIL": "Petroleum",
+      "OTH": "Other",
+      "SUN": "Solar",
+      "WAT": "Hydro",
+      "WND": "Wind"
+    },
+    "code_groups": {
+      "COL": "coal",
+      "NG": "gas",
+      "NUC": "nuclear",
+      "OIL": "other",
+      "OTH": "other",
+      "SUN": "solar",
+      "WAT": "hydro",
+      "WND": "wind"
+    },
     "first_month": "2018-12",
     "last_month": "2026-11"
+  },
+  "explorer": {
+    "pjm": {
+      "hourly_files": [
+        "hourly_pjm_2019.json",
+        "hourly_pjm_2020.json",
+        "hourly_pjm_2021.json",
+        "hourly_pjm_2022.json",
+        "hourly_pjm_2023.json",
+        "hourly_pjm_2024.json",
+        "hourly_pjm_2025.json",
+        "hourly_pjm_2026.json"
+      ],
+      "days": 2873,
+      "months": 96,
+      "first_hour_utc": "2019-01-01T00",
+      "last_hour_utc": "2026-11-11T23",
+      "gen_first_hour_utc": "2019-01-01T00",
+      "groups": [
+        "gas",
+        "coal",
+        "nuclear",
+        "solar",
+        "wind",
+        "hydro",
+        "other"
+      ],
+      "gen_guard": "hourly value dropped when above 5 times that fuel code's 99.9th percentile of absolute values",
+      "gen_hours_dropped": 0,
+      "gen_hours_dropped_examples": [],
+      "demand_hours_present": 68796,
+      "gen_group_hours_present": {
+        "gas": 68788,
+        "coal": 68783,
+        "nuclear": 68783,
+        "solar": 68781,
+        "wind": 68788,
+        "hydro": 68788,
+        "other": 68788
+      },
+      "has_923": false
+    },
+    "us": {
+      "hourly_files": [
+        "hourly_us_2019.json",
+        "hourly_us_2020.json",
+        "hourly_us_2021.json",
+        "hourly_us_2022.json",
+        "hourly_us_2023.json",
+        "hourly_us_2024.json",
+        "hourly_us_2025.json",
+        "hourly_us_2026.json"
+      ],
+      "days": 2873,
+      "months": 96,
+      "first_hour_utc": "2019-01-01T00",
+      "last_hour_utc": "2026-11-11T23",
+      "gen_first_hour_utc": "2019-01-01T00",
+      "groups": [
+        "gas",
+        "coal",
+        "nuclear",
+        "solar",
+        "wind",
+        "hydro",
+        "storage",
+        "other"
+      ],
+      "gen_guard": "hourly value dropped when above 5 times that fuel code's 99.9th percentile of absolute values",
+      "gen_hours_dropped": 2,
+      "gen_hours_dropped_examples": [
+        {
+          "code": "SNB",
+          "hour_et": "2026-08-27 15:00",
+          "value_mw": 21318.0
+        },
+        {
+          "code": "SNB",
+          "hour_et": "2026-09-17 20:00",
+          "value_mw": 36426.0
+        }
+      ],
+      "demand_hours_present": 68928,
+      "gen_group_hours_present": {
+        "gas": 68909,
+        "coal": 68909,
+        "nuclear": 68909,
+        "solar": 68909,
+        "wind": 68909,
+        "hydro": 68909,
+        "storage": 17805,
+        "other": 68909
+      },
+      "has_923": true
+    }
   },
   "status_names": {
     "SB": "Standby/Backup: available for service but not normally used",
@@ -510,6 +651,8 @@
     "first_month": "2018-12",
     "last_month": "2026-11",
     "zones": [],
+    "daily_min_hours": 20,
+    "days_in_daily_series": 2871,
     "partial_months": [
       "2018-12",
       "2026-11"
@@ -518,16 +661,47 @@
   "fuel_us": {
     "min_coverage": 0.95,
     "hourly_rows": 681183,
-    "codes_unmapped": [
-      "OES",
-      "SNB",
-      "UES",
-      "WNB"
-    ],
+    "codes_unmapped": [],
+    "code_names": {
+      "COL": "Coal",
+      "NG": "Natural Gas",
+      "NUC": "Nuclear",
+      "OIL": "Petroleum",
+      "OTH": "Other",
+      "SUN": "Solar",
+      "WAT": "Hydro",
+      "WND": "Wind",
+      "UNK": "Unknown",
+      "BAT": "Battery storage",
+      "OES": "Other energy storage",
+      "PS": "Pumped storage",
+      "SNB": "Solar with integrated battery storage",
+      "GEO": "Geothermal",
+      "UES": "Unknown energy storage",
+      "WNB": "Wind with integrated battery storage"
+    },
+    "code_groups": {
+      "BAT": "storage",
+      "COL": "coal",
+      "GEO": "other",
+      "NG": "gas",
+      "NUC": "nuclear",
+      "OES": "storage",
+      "OIL": "other",
+      "OTH": "other",
+      "PS": "storage",
+      "SNB": "solar",
+      "SUN": "solar",
+      "UES": "storage",
+      "UNK": "other",
+      "WAT": "hydro",
+      "WNB": "wind",
+      "WND": "wind"
+    },
     "first_month": "2018-12",
     "last_month": "2026-11"
   },
-  "built_at_utc": "2026-11-12T01:02:40+00:00",
+  "built_at_utc": "2026-11-12T01:41:04+00:00",
   "window_start": "2022-11-30",
   "baseline_window": [
     "2021-11",
