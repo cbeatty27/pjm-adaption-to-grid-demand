@@ -27,7 +27,7 @@ export function mount(root, { meta, dcMeta }) {
       ${row('Routes', `<code>electricity/rto/region-data</code> (demand, type D); <code>electricity/rto/region-sub-ba-data</code> (PJM subregions); <code>electricity/rto/fuel-type-data</code> (net generation by fuel). Respondent or parent: PJM.`)}
       ${row('Period', `Hourly from 2019-01-01. Demand months ${esc(meta.demand?.first_month || '')} to ${esc(meta.demand?.last_month || '')}.`)}
       ${row('How it is used', 'Hours are grouped into months in Eastern time. Demand: monthly highest, average and lowest hour. Fuel mix: monthly GWh per fuel group. The case study compares two 12-month windows (' + esc((meta.baseline_window || []).join(' to ')) + ' and the latest 12 complete months).')}
-      ${row('Cleaning', `Hours with a non-positive demand value are dropped and counted (${nf0.format(meta.demand?.non_positive_rows_dropped ?? 0)}). EIA-930 also contains impossible reported values (one hour reads 2,147,480,000 MW). An hour is dropped when it is more than 1.5 times or less than half the median of the surrounding 7 days of the same series, which is a rule of this site and not an EIA flag. The count is ${nf0.format(meta.demand?.outlier_hours_dropped ?? 0)} hours across PJM and its zones, and each one is listed in <code>data/meta.json</code>. Duplicate hours are removed. Months with under 97% of expected hours are excluded from charts. Nothing is filled in or estimated.`)}
+      ${row('Cleaning', `Hours with a non-positive demand value are dropped and counted (${nf0.format(meta.demand?.non_positive_rows_dropped ?? 0)}). EIA-930 also contains impossible reported values (one hour reads 2,147,480,000 MW). An hour is dropped when it is more than 1.5 times or less than half the median of the surrounding 7 days of the same series, which is a rule of this site and not an EIA flag. The count is ${nf0.format(meta.demand?.outlier_hours_dropped ?? 0)} hours across PJM and its zones, and each one is listed in <code>data/meta.json</code>. Duplicate hours are removed. Months with under ${Math.round((meta.demand?.min_coverage ?? 0.97) * 100)}% of expected hours are excluded from charts. Nothing is filled in or estimated.`)}
       ${row('Why not PJM directly', 'PJM\'s own Data Miner service was not used. PJM figures here are PJM\'s reports to EIA.')}
     </dl></section>
 
@@ -44,7 +44,7 @@ export function mount(root, { meta, dcMeta }) {
     <h2 class="sec">Supporting components, not data sources</h2>
     <ul>
       <li><strong>Basemap tiles:</strong> OpenFreeMap vector tiles (OpenMapTiles, data from OpenStreetMap), loaded in your browser for the map background only. OpenFreeMap states its public service is free, needs no API key and is provided as-is. Attribution is shown on the map.</li>
-      <li><strong>Software, bundled into the site:</strong> MapLibre GL JS (map), Chart.js (charts), Vite (build), IBM Plex fonts via Fontsource. Python with pandas and requests runs the data pipeline.</li>
+      <li><strong>Software, bundled into the site:</strong> MapLibre GL JS (map), Chart.js (charts), Vite (build), Instrument Sans via Fontsource. Python with pandas and requests runs the data pipeline.</li>
       <li><strong>Hosting and automation:</strong> GitHub Pages and GitHub Actions. The EIA API key is stored as an Actions secret and appears nowhere in the code or the site.</li>
       <li><strong>Documentation read to learn field names, not used as data:</strong> EIA's API documentation and the OSTI record for the IM3 atlas.</li>
     </ul>

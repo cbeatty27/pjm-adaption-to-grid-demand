@@ -3,7 +3,9 @@ import { FUEL_COLOR } from '../lib/fuels.js';
 import { esc, nf0, mw as fmtMw, ymIndex, indexYm, ymLabel, sum } from '../lib/format.js';
 
 const STYLE_URL = 'https://tiles.openfreemap.org/styles/positron';
-const BLANK = { version: 8, sources: {}, layers: [{ id: 'bg', type: 'background', paint: { 'background-color': '#dfe5ea' } }] };
+const BLANK = { version: 8, sources: {}, layers: [{ id: 'bg', type: 'background', paint: { 'background-color': '#e6eef1' } }] };
+const INK = '#15323d';
+const DC = '#17404e'; // data center symbols
 
 async function pickStyle() {
   if (new URLSearchParams(location.hash.split('?')[1] || '').get('basemap') === 'none') return { style: BLANK, ok: false };
@@ -14,13 +16,38 @@ async function pickStyle() {
   return { style: BLANK, ok: false };
 }
 
-function squareIcon() {
-  const s = 24, c = document.createElement('canvas');
-  c.width = c.height = s;
+// Data center symbols, one silhouette per IM3 record type so the type reads without color:
+// building = rounded square, campus = rounded square with an inner outline, point = diamond.
+function dcIcon(kind) {
+  const S = 48, c = document.createElement('canvas');
+  c.width = c.height = S;
   const g = c.getContext('2d');
-  g.fillStyle = '#ffffff'; g.fillRect(0, 0, s, s);
-  g.fillStyle = '#0e1b2b'; g.fillRect(3, 3, s - 6, s - 6);
-  return g.getImageData(0, 0, s, s);
+  const rr = (x, y, w, h, r) => { g.beginPath(); if (g.roundRect) g.roundRect(x, y, w, h, r); else g.rect(x, y, w, h); };
+  if (kind === 'point') {
+    g.translate(S / 2, S / 2); g.rotate(Math.PI / 4);
+    const h = 15; g.fillStyle = '#ffffff'; rr(-h - 3, -h - 3, 2 * h + 6, 2 * h + 6, 8); g.fill();
+    g.fillStyle = DC; rr(-h, -h, 2 * h, 2 * h, 6); g.fill();
+  } else {
+    g.fillStyle = '#ffffff'; rr(2, 2, S - 4, S - 4, 14); g.fill();
+    g.fillStyle = DC; rr(6, 6, S - 12, S - 12, 10); g.fill();
+    if (kind === 'campus') { g.strokeStyle = '#ffffff'; g.lineWidth = 3; rr(15, 15, S - 30, S - 30, 5); g.stroke(); }
+  }
+  return g.getImageData(0, 0, S, S);
+}
+const dcGlyph = (kind) => {
+  if (kind === 'point') return `<svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true"><rect x="2.4" y="2.4" width="7.2" height="7.2" rx="1.6" transform="rotate(45 6 6)" fill="${DC}"/></svg>`;
+  if (kind === 'campus') return `<svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true"><rect width="12" height="12" rx="3" fill="${DC}"/><rect x="3.4" y="3.4" width="5.2" height="5.2" rx="1.2" fill="none" stroke="#fff" stroke-width="1"/></svg>`;
+  return `<svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true"><rect width="12" height="12" rx="3" fill="${DC}"/></svg>`;
+};
+
+// Calm the basemap: cool paper land and soft blue water, only where the style has those layers.
+function tintBasemap(map) {
+  for (const l of map.getStyle().layers || []) {
+    try {
+      if (l.type === 'background') map.setPaintProperty(l.id, 'background-color', '#eef3f4');
+      else if (l.type === 'fill' && l.id === 'water') map.setPaintProperty(l.id, 'fill-color', '#d6e5ec');
+    } catch { /* style variant without this property */ }
+  }
 }
 
 export async function mount(root, data) {
@@ -60,7 +87,7 @@ export async function mount(root, data) {
           <h2>Layers</h2>
           <div class="toggles">
             <label class="check"><input type="checkbox" id="lyFleet"><span>Generators online before the window<small>EIA operating units with an operating month up to ${esc(ymLabel(indexYm(WIN)))}, drawn faintly for context.</small></span></label>
-            <label class="check"><input type="checkbox" id="lyDc" checked><span><svg class="key" width="12" height="12"><rect width="12" height="12" fill="#0e1b2b"/></svg>Data center records (IM3, static)<small>IM3 has no online date, so these do not move with the slider. Footprint area sets symbol size.</small></span></label>
+            <label class="check"><input type="checkbox" id="lyDc" checked><span>Data center records (IM3, static)<small>IM3 has no online date, so these do not move with the slider. Footprint area sets symbol size; the shape shows the record type.</small></span></label>
             <div class="chips" id="dcTypes" role="group" aria-label="IM3 record types"></div>
             <label class="check"><input type="checkbox" id="dcPjm" checked><span>Only states where EIA lists PJM generators<small>State level, so it includes parts of states outside PJM. No boundary file is used.</small></span></label>
           </div>
@@ -124,16 +151,17 @@ export async function mount(root, data) {
   }
 
   map.on('load', () => {
-    map.addImage('dcsq', squareIcon());
+    if (ok) tintBasemap(map);
+    for (const k of ['building', 'campus', 'point']) map.addImage(`dc-${k}`, dcIcon(k), { pixelRatio: 2 });
     map.addSource('fleet', { type: 'geojson', data: fleetFc });
     map.addSource('win', { type: 'geojson', data: winFc });
     map.addSource('dc', { type: 'geojson', data: dcFc });
-    map.addLayer({ id: 'fleet', type: 'circle', source: 'fleet', paint: { 'circle-color': colorExpr, 'circle-opacity': 0.28, 'circle-radius': radius(0.8) } });
+    map.addLayer({ id: 'fleet', type: 'circle', source: 'fleet', paint: { 'circle-color': colorExpr, 'circle-opacity': 0.3, 'circle-radius': radius(0.8) } });
     map.addLayer({
       id: 'dc', type: 'symbol', source: 'dc',
-      layout: { 'icon-image': 'dcsq', 'icon-allow-overlap': true, 'icon-size': ['interpolate', ['linear'], ['sqrt', ['max', ['get', 'sqft'], 0]], 0, 0.34, 500, 0.46, 2000, 0.62, 6000, 0.9] },
+      layout: { 'icon-image': ['match', ['get', 'type'], 'campus', 'dc-campus', 'point', 'dc-point', 'dc-building'], 'icon-allow-overlap': true, 'icon-size': ['interpolate', ['linear'], ['sqrt', ['max', ['get', 'sqft'], 0]], 0, 0.34, 500, 0.46, 2000, 0.62, 6000, 0.9] },
     });
-    map.addLayer({ id: 'win', type: 'circle', source: 'win', paint: { 'circle-color': colorExpr, 'circle-opacity': 0.92, 'circle-radius': radius(1), 'circle-stroke-color': '#0e1b2b', 'circle-stroke-width': 0.8 } });
+    map.addLayer({ id: 'win', type: 'circle', source: 'win', paint: { 'circle-color': colorExpr, 'circle-opacity': 0.94, 'circle-radius': radius(1), 'circle-stroke-color': '#ffffff', 'circle-stroke-width': 1.2 } });
 
     const pts = units.filter((u) => u.lat != null && u.lon != null);
     if (pts.length) {
@@ -207,7 +235,7 @@ export async function mount(root, data) {
     const n = dcs.filter((d) => state.dcTypes.has(d.type) && (!state.dcPjmOnly || pjmStates.has(d.state_abb))).length;
     $('dcCount').textContent = state.showDc ? `${nf0.format(n)} IM3 records shown (of ${nf0.format(dcs.length)}). A campus and the buildings inside it are separate records, so this is not a count of facilities.` : '';
   }
-  $('dcTypes').innerHTML = ['building', 'campus', 'point'].map((t) => `<button class="chip" type="button" data-type="${t}" aria-pressed="true">${t}</button>`).join('');
+  $('dcTypes').innerHTML = ['building', 'campus', 'point'].map((t) => `<button class="chip" type="button" data-type="${t}" aria-pressed="true">${dcGlyph(t)}${t}</button>`).join('');
   $('dcTypes').addEventListener('click', (e) => {
     const b = e.target.closest('[data-type]'); if (!b) return;
     const t = b.dataset.type; state.dcTypes.has(t) ? state.dcTypes.delete(t) : state.dcTypes.add(t);
@@ -237,23 +265,23 @@ export async function mount(root, data) {
         if (!state.fuels.has(g.key)) continue;
         const h = monthly[i][g.key] * scale;
         if (h <= 0) continue;
-        mk('rect', { x: xOf(i) - bw / 2, y: y - h, width: bw, height: h, fill: FUEL_COLOR[g.key], opacity: faded ? 0.22 : 1, stroke: '#fff', 'stroke-width': 0.6 });
+        mk('rect', { x: xOf(i) - bw / 2, y: y - h, width: bw, height: h, fill: FUEL_COLOR[g.key], opacity: faded ? 0.25 : 1, stroke: '#fff', 'stroke-width': 0.6, rx: 1 });
         y -= h;
       }
-      mk('rect', { x: xOf(i) - bw / 2, y: barBase, width: bw, height: 2, fill: i <= state.s ? '#0e1b2b' : '#cbd3dc' });
+      mk('rect', { x: xOf(i) - bw / 2, y: barBase, width: bw, height: 2, fill: i <= state.s ? INK : '#d3dfe3' });
     }
     // axis: tick per month, label per January and the first month
     for (let i = 0; i < N; i++) {
       const ym = indexYm(WIN + 1 + i);
       const jan = ym.endsWith('-01');
-      mk('line', { x1: xOf(i), x2: xOf(i), y1: barBase + 2, y2: barBase + (jan ? 9 : 5), stroke: '#6b7685', 'stroke-width': 1 });
+      mk('line', { x1: xOf(i), x2: xOf(i), y1: barBase + 2, y2: barBase + (jan ? 9 : 5), stroke: '#5b7886', 'stroke-width': 1 });
       if (i === 0) { const t = mk('text', { x: padL, y: barBase + 22, 'text-anchor': 'start' }); t.textContent = ymLabel(ym); }
       else if (jan && i > 4) { const t = mk('text', { x: xOf(i), y: barBase + 22, 'text-anchor': 'middle' }); t.textContent = ym.slice(0, 4); }
     }
     // playhead
     const x = xOf(state.s);
-    mk('line', { x1: x, x2: x, y1: 0, y2: barBase + 10, stroke: '#0e1b2b', 'stroke-width': 2 });
-    mk('path', { d: `M${x - 6},${barBase + 10} L${x + 6},${barBase + 10} L${x},${barBase + 2} Z`, fill: '#0e1b2b' });
+    mk('line', { x1: x, x2: x, y1: 0, y2: barBase + 10, stroke: INK, 'stroke-width': 2 });
+    mk('path', { d: `M${x - 6},${barBase + 10} L${x + 6},${barBase + 10} L${x},${barBase + 2} Z`, fill: INK });
   }
   new ResizeObserver(() => { W = ruler.clientWidth; drawRuler(); }).observe(ruler);
 

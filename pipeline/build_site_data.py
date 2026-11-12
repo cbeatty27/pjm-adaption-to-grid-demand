@@ -177,6 +177,8 @@ def month_key(ts: pd.Series) -> pd.Series:
 # OUT_HI times or less than OUT_LO times the median of the surrounding 7 days of the same
 # series. Dropped hours are listed in meta.json; nothing is filled in or estimated.
 OUT_HI, OUT_LO, OUT_WINDOW = 1.5, 0.5, "7D"
+# A month is used in charts and 12-month windows only when at least this share of its hours is present.
+MIN_COVERAGE = 0.95
 
 
 def drop_outlier_hours(df: pd.DataFrame, label: str) -> tuple[pd.DataFrame, list[dict]]:
@@ -243,7 +245,7 @@ def build_demand(meta: dict) -> None:
         return {"avg_mw": round(float(w["val"].mean()), 1), "peak_mw": round(float(w["val"].max()), 1),
                 "min_mw": round(float(w["val"].min()), 1), "hours": int(len(w))}
 
-    full = agg[agg["cov"] >= 0.97]["m"].tolist()
+    full = agg[agg["cov"] >= MIN_COVERAGE]["m"].tolist()
     latest_hi = full[-1]
     latest_lo = (pd.Period(latest_hi) - 11).strftime("%Y-%m")
     comparison = {
@@ -262,12 +264,13 @@ def build_demand(meta: dict) -> None:
     (OUT / "demand.json").write_text(json.dumps(out, separators=(",", ":")))
     meta["demand"] = {
         "hourly_rows": n_all, "non_positive_rows_dropped": nonpos, "months": len(months),
+        "min_coverage": MIN_COVERAGE,
         "outlier_rule": {"high_x_median": OUT_HI, "low_x_median": OUT_LO, "window": "centered 7 days, same series"},
         "outlier_hours_dropped": len(dropped),
         "outlier_hours_dropped_pjm": sum(1 for r in dropped if r["series"] == "PJM"),
         "outlier_hours": dropped[:400],
         "first_month": months[0], "last_month": months[-1], "zones": sorted(zones),
-        "partial_months": [m for m, c in zip(months, monthly["coverage"]) if c < 0.97],
+        "partial_months": [m for m, c in zip(months, monthly["coverage"]) if c < MIN_COVERAGE],
     }
 
 
@@ -290,7 +293,7 @@ def build_fuel(meta: dict) -> None:
         "codes_seen": sorted(set(f["fueltype"])),
         "codes_unmapped": unmapped,
     }
-    full = [m for m, c in zip(months, cov) if c >= 0.97]
+    full = [m for m, c in zip(months, cov) if c >= MIN_COVERAGE]
     hi = full[-1]
     lo = (pd.Period(hi) - 11).strftime("%Y-%m")
 
@@ -303,7 +306,7 @@ def build_fuel(meta: dict) -> None:
         "latest": {"from": lo, "to": hi, "gwh": win(lo, hi)},
     }
     (OUT / "fuelmix.json").write_text(json.dumps(out, separators=(",", ":")))
-    meta["fuel"] = {"hourly_rows": int(len(f)), "codes_unmapped": unmapped, "first_month": months[0], "last_month": months[-1]}
+    meta["fuel"] = {"min_coverage": MIN_COVERAGE, "hourly_rows": int(len(f)), "codes_unmapped": unmapped, "first_month": months[0], "last_month": months[-1]}
 
 
 def main() -> int:
