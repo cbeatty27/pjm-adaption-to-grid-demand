@@ -190,7 +190,7 @@ export function demandFigure(host, { meta, demand, dm, scope, series }) {
     const warm = (w) => w.to > '2022-10';
     views.push({
       id: 'annual', label: 'Yearly totals', height: 380,
-      note: `Total electricity demand in each 12-month window ending ${ymLabel(l.to).split(' ')[0]}, in TWh. The bars start at zero, so a few percent looks small; the labels give the change from the window before.`,
+      note: `Total electricity demand in each 12-month window ending ${ymLabel(l.to).split(' ')[0]}, in TWh. The bars start at zero, so a few percent looks small; the labels give the change from the window before.${wins.some((w) => w.hours > 8770) ? ' A window that includes February 29 has one extra day (about 0.3% more hours).' : ''}`,
       legend: `<span><i style="background:${TIME.cool}"></i>Windows ending before ChatGPT's release</span><span><i style="background:${TIME.warm}"></i>Windows ending after</span>`,
       draw: (cv) => new Chart(cv, {
         type: 'bar',

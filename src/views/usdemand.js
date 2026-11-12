@@ -8,7 +8,7 @@ const SECTORS = ['RES', 'COM', 'IND', 'TRA', 'OTH'];
 function retailFigure(host, retail, meta) {
   const months = retail.months;
   const last = months.length - 1;
-  const ids = SECTORS.filter((k) => retail.sectors[k]);
+  const ids = SECTORS.filter((k) => retail.sectors[k]?.gwh.some((v) => v > 0)); // EIA reports 0 for the "other" class
   if (last < 23 || !ids.length) return null;
   const win = (k) => ({ lo: last - 11 - 12 * k, hi: last - 12 * k });
   const ks = []; for (let k = 5; k >= 0; k--) if (win(k).lo >= 0) ks.push(k);
