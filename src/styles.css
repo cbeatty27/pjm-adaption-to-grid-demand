@@ -74,7 +74,7 @@ main { flex: 1; min-height: 0; outline: none; }
 #map { position: absolute; inset: 0; }
 .mapview__side { grid-row: 1 / span 2; grid-column: 2; background: var(--panel); overflow-y: auto; }
 .mapview__dock { grid-row: 2; grid-column: 1; background: var(--panel); border-top: 1px solid var(--rule); border-right: 1px solid var(--rule); padding: 12px 20px 14px; }
-.map-note { position: absolute; left: 12px; bottom: 28px; background: rgba(255, 255, 255, .94); border: 1px solid var(--rule); border-radius: var(--r-ctl); padding: 5px 10px; font-size: 12px; color: var(--ink-2); max-width: 360px; }
+.map-note { position: absolute; left: 56px; top: 12px; background: rgba(255, 255, 255, .94); border: 1px solid var(--rule); border-radius: var(--r-ctl); padding: 5px 10px; font-size: 12px; color: var(--ink-2); max-width: 360px; }
 .maplibregl-ctrl-attrib { font-size: 11px; }
 .maplibregl-ctrl-group { border-radius: var(--r-ctl) !important; box-shadow: 0 0 0 1px var(--rule) !important; }
 
@@ -84,13 +84,22 @@ main { flex: 1; min-height: 0; outline: none; }
 .side__big small { font-size: 14px; font-weight: 500; color: var(--ink-3); margin-left: 6px; letter-spacing: 0; }
 .side__sub { color: var(--ink-3); font-size: 13px; margin: 6px 0 12px; }
 .fuelrows { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; }
-.fuelrow { display: grid; grid-template-columns: 12px 76px 1fr 66px; align-items: center; gap: 10px; font-size: 13px; padding: 5px 8px; border: 0; background: none; width: 100%; text-align: left; cursor: pointer; border-radius: 8px; }
+.fuelrow { display: grid; grid-template-columns: 12px 76px 1fr 56px 34px; align-items: center; gap: 10px; font-size: 13px; padding: 5px 8px; border: 0; background: none; width: 100%; text-align: left; cursor: pointer; border-radius: 8px; }
 .fuelrow:hover { background: var(--paper); }
 .fuelrow[aria-pressed='false'] { opacity: .4; }
 .fuelrow i { width: 12px; height: 12px; border-radius: 4px; display: block; }
 .fuelrow .bar { height: 6px; background: var(--rule-soft); border-radius: 3px; overflow: hidden; }
 .fuelrow .bar b { display: block; height: 100%; border-radius: 3px; }
 .fuelrow .v { text-align: right; font-weight: 600; font-variant-numeric: tabular-nums; }
+.fuelrow .pc { text-align: right; color: var(--ink-3); font-variant-numeric: tabular-nums; font-size: 12px; }
+.maplegend { position: absolute; left: 12px; bottom: 28px; background: rgba(255, 255, 255, .95); border: 1px solid var(--rule); border-radius: 12px; padding: 10px 14px 10px; font-size: 12px; color: var(--ink-2); max-width: calc(100% - 24px); }
+.maplegend .ml__t { font-weight: 600; color: var(--ink); margin-bottom: 4px; }
+.maplegend svg { display: block; max-width: 100%; }
+.ml__fuels { list-style: none; margin: 6px 0 0; padding: 0; display: grid; grid-template-columns: repeat(4, auto); gap: 5px 16px; }
+.ml__fuels li { display: flex; align-items: center; gap: 6px; white-space: nowrap; }
+.ml__fuels i { width: 11px; height: 11px; border-radius: 50%; display: block; }
+.ml__n { margin: 8px 0 0; display: flex; align-items: center; gap: 6px; color: var(--ink-3); }
+.ml__n .ring { width: 11px; height: 11px; border-radius: 50%; border: 2px solid var(--ink-2); display: block; }
 .toggles { display: grid; gap: 10px; }
 .check { display: grid; grid-template-columns: 18px 1fr; gap: 10px; align-items: start; font-size: 14px; cursor: pointer; }
 .check input { margin: 3px 0 0; accent-color: var(--accent); width: 16px; height: 16px; }

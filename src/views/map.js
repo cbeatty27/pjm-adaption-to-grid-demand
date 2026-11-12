@@ -88,7 +88,7 @@ export async function mountMap(root, data, opt) {
 
   root.innerHTML = `
     <div class="mapview">
-      <div class="mapview__map"><div id="map" role="application" aria-label="Map of ${scopeName} generators and IM3 data center records"></div><div class="map-note" id="mapnote" hidden></div></div>
+      <div class="mapview__map"><div id="map" role="application" aria-label="Map of ${scopeName} generators and IM3 data center records"></div><div class="map-note" id="mapnote" hidden></div><div class="maplegend" id="maplegend" aria-label="Map legend"></div></div>
       <aside class="mapview__side" aria-label="Summary and layers">
         <section class="side__section" aria-live="polite">
           <h2 id="sumTitle"></h2>
@@ -150,9 +150,18 @@ export async function mountMap(root, data, opt) {
   const retFc = toFc(retired, (u, i) => ({ group: u.group, mw: Math.max(u.mw || 0, 0), t: u.t, i }));
 
   const colorExpr = ['match', ['get', 'group'], ...groups.flatMap((g) => [g.key, FUEL_COLOR[g.key] || FUEL_COLOR.other]), FUEL_COLOR.other];
-  const radiusAt = (k) => ['interpolate', ['linear'], ['sqrt', ['max', ['get', 'mw'], 0]], 0, 2.5 * k, 12, 6 * k, 32, 12 * k];
-  // On the U.S. map the dots shrink when zoomed out so the dense East stays readable.
-  const radius = (k) => (US ? ['interpolate', ['linear'], ['zoom'], 3, radiusAt(k * 0.42), 7, radiusAt(k)] : radiusAt(k));
+  // Circle AREA is proportional to capacity: radius = K * sqrt(MW), with a small floor so 1 MW units stay visible.
+  // On the U.S. map the whole scale shrinks when zoomed out (so the dense East stays readable); the legend follows the zoom.
+  const K = 0.44, MINR = 1.4, ZOOM_LO = 3, ZOOM_HI = 7, FAR = 0.45;
+  const rAt = (f) => ['max', MINR, ['*', K * f, ['sqrt', ['max', ['get', 'mw'], 0]]]];
+  const radius = US ? ['interpolate', ['linear'], ['zoom'], ZOOM_LO, rAt(FAR), ZOOM_HI, rAt(1)] : rAt(1);
+  const radiusPx = (mw, z) => {
+    const s = Math.sqrt(Math.max(mw, 0));
+    if (!US) return Math.max(MINR, K * s);
+    const t = Math.min(1, Math.max(0, (z - ZOOM_LO) / (ZOOM_HI - ZOOM_LO)));
+    const a = Math.max(MINR, K * FAR * s), b = Math.max(MINR, K * s);
+    return a + (b - a) * t;
+  };
   const iconSizeAt = (k) => ['interpolate', ['linear'], ['sqrt', ['max', ['get', 'sqft'], 0]], 0, 0.34 * k, 500, 0.46 * k, 2000, 0.62 * k, 6000, 0.9 * k];
   const iconSize = US ? ['interpolate', ['linear'], ['zoom'], 3, iconSizeAt(0.6), 7, iconSizeAt(1)] : iconSizeAt(1);
 
@@ -174,6 +183,30 @@ export async function mountMap(root, data, opt) {
     map.setLayoutProperty('dc', 'visibility', state.showDc ? 'visible' : 'none');
   }
 
+  // ---- legend: circle-size scale (same sizes as the dots at the current zoom) and fuel colors ----
+  const SCALE = [1, 100, 300, 500, 750, 1000];
+  const hasRet = !!opt.retired;
+  function drawLegend() {
+    const z = map.getZoom ? map.getZoom() : 5;
+    const W = 262, x0 = 10, perMw = (W - x0 - 14) / 1000;
+    const rMax = radiusPx(1000, z);
+    const cy = Math.ceil(rMax) + 3, axisY = cy + Math.ceil(rMax) + 6;
+    const H = axisY + 24;
+    const parts = [`<line x1="${x0}" x2="${x0 + 1000 * perMw}" y1="${axisY}" y2="${axisY}" stroke="#5b7886" stroke-width="1"/>`];
+    for (const mwv of SCALE) {
+      const x = x0 + mwv * perMw;
+      parts.push(`<circle cx="${x.toFixed(1)}" cy="${cy}" r="${radiusPx(mwv, z).toFixed(2)}" fill="#15323d"/>`,
+        `<line x1="${x.toFixed(1)}" x2="${x.toFixed(1)}" y1="${axisY}" y2="${axisY + 6}" stroke="#5b7886"/>`,
+        `<text x="${x.toFixed(1)}" y="${axisY + 19}" text-anchor="middle" font-size="11" fill="#3f5c68">${nf0.format(mwv)}</text>`);
+    }
+    $('maplegend').innerHTML = `<div class="ml__t">Circle area is proportional to capacity (MW)</div>
+      <svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" aria-hidden="true">${parts.join('')}</svg>
+      <ul class="ml__fuels">${groups.map((g) => `<li><i style="background:${FUEL_COLOR[g.key]}"></i>${esc(g.label)}</li>`).join('')}</ul>
+      ${hasRet ? `<p class="ml__n"><i class="ring"></i>Hollow ring: generator retired since Dec 2022</p>` : ''}`;
+  }
+  drawLegend();
+  if (US) map.on('zoom', drawLegend);
+
   map.on('load', () => {
     if (ok) tintBasemap(map);
     for (const k of ['building', 'campus', 'point']) map.addImage(`dc-${k}`, dcIcon(k), { pixelRatio: 2 });
@@ -181,13 +214,13 @@ export async function mountMap(root, data, opt) {
     map.addSource('win', { type: 'geojson', data: winFc });
     map.addSource('dc', { type: 'geojson', data: dcFc });
     map.addSource('ret', { type: 'geojson', data: retFc });
-    map.addLayer({ id: 'fleet', type: 'circle', source: 'fleet', paint: { 'circle-color': colorExpr, 'circle-opacity': 0.3, 'circle-radius': radius(0.8) } });
+    map.addLayer({ id: 'fleet', type: 'circle', source: 'fleet', paint: { 'circle-color': colorExpr, 'circle-opacity': 0.3, 'circle-radius': radius } });
     map.addLayer({
       id: 'dc', type: 'symbol', source: 'dc',
       layout: { 'icon-image': ['match', ['get', 'type'], 'campus', 'dc-campus', 'point', 'dc-point', 'dc-building'], 'icon-allow-overlap': true, 'icon-size': iconSize },
     });
-    map.addLayer({ id: 'ret', type: 'circle', source: 'ret', paint: { 'circle-color': 'rgba(255,255,255,0.35)', 'circle-stroke-color': colorExpr, 'circle-stroke-width': 2.2, 'circle-radius': radius(0.9) } });
-    map.addLayer({ id: 'win', type: 'circle', source: 'win', paint: { 'circle-color': colorExpr, 'circle-opacity': 0.94, 'circle-radius': radius(1), 'circle-stroke-color': '#ffffff', 'circle-stroke-width': 1.2 } });
+    map.addLayer({ id: 'ret', type: 'circle', source: 'ret', paint: { 'circle-color': 'rgba(255,255,255,0.35)', 'circle-stroke-color': colorExpr, 'circle-stroke-width': 2.2, 'circle-radius': radius } });
+    map.addLayer({ id: 'win', type: 'circle', source: 'win', paint: { 'circle-color': colorExpr, 'circle-opacity': 0.94, 'circle-radius': radius, 'circle-stroke-color': '#ffffff', 'circle-stroke-width': 1.2 } });
 
     const pts = units.filter((u) => u.lat != null && u.lon != null);
     if (US) {
@@ -258,16 +291,18 @@ export async function mountMap(root, data, opt) {
       ? `Online from Dec 2022 through ${ymLabel(indexYm(T))}`
       : `Reaching operation in ${ymLabel(indexYm(T))}`;
     $('sumMw').textContent = nf0.format(mwTot);
-    $('sumSub').textContent = `${nf0.format(nTot)} generator units. Click a fuel to hide or show it.`;
+    $('sumSub').textContent = `${nf0.format(nTot)} generator units. Bars show each fuel's share of the MW shown. Click a fuel to hide or show it.`;
     if (opt.retired) {
       const rr = (opt.retired || []).filter((r) => r.ret && ymIndex(r.ret) > WIN && (state.mode === 'cum' ? ymIndex(r.ret) <= T : ymIndex(r.ret) === T) && state.fuels.has(r.group));
       $('sumRet').textContent = `Retired in the same period: ${nf0.format(sum(rr.map((r) => r.mw)))} MW (${nf0.format(rr.length)} units, ${meta.retired.capacity_basis}).`;
     }
-    const max = Math.max(1, ...groups.map((g) => tot[g.key].mw));
-    $('fuelRows').innerHTML = groups.map((g) => `<li><button class="fuelrow" type="button" data-fuel="${g.key}" aria-pressed="${state.fuels.has(g.key)}">
+    // Bars show each fuel's share of all capacity in the period (not relative to the largest fuel, which would
+    // pin the biggest fuel at full width), so they move as the slider moves.
+    const allMw = Math.max(1, sum(groups.map((g) => tot[g.key].mw)));
+    $('fuelRows').innerHTML = groups.map((g) => { const sh = (100 * tot[g.key].mw) / allMw; return `<li><button class="fuelrow" type="button" data-fuel="${g.key}" aria-pressed="${state.fuels.has(g.key)}">
         <i style="background:${FUEL_COLOR[g.key]}"></i><span>${esc(g.label)}</span>
-        <span class="bar"><b style="width:${(100 * tot[g.key].mw) / max}%;background:${FUEL_COLOR[g.key]}"></b></span>
-        <span class="v">${nf0.format(tot[g.key].mw)}</span></button></li>`).join('');
+        <span class="bar" title="${sh.toFixed(1)}% of the capacity shown"><b style="width:${sh}%;background:${FUEL_COLOR[g.key]}"></b></span>
+        <span class="v">${nf0.format(tot[g.key].mw)}</span><span class="pc">${sh >= 0.5 ? Math.round(sh) : sh > 0 ? '<1' : 0}%</span></button></li>`; }).join('');
   }
   $('fuelRows').addEventListener('click', (e) => {
     const b = e.target.closest('[data-fuel]'); if (!b) return;
