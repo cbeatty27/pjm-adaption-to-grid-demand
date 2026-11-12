@@ -2,7 +2,7 @@
 
 A study of how the PJM Interconnection's generation and demand changed from the public release of ChatGPT (November 30, 2022) to today, alongside the locations of data centers in the IM3 atlas.
 
-The site has three tabs: a map with a timeline slider, a PJM case study (demand, zone growth, fuel mix, generator additions) and a sources and method page.
+The site has five tabs: U.S. demand (the Lower 48 total and five-year growth), a U.S. map with a timeline slider, a PJM map, a PJM case study (demand, zone growth, fuel mix, generator additions) and a sources and method page. The U.S. tabs appear empty until the data pipeline has been run with the U.S. pulls.
 
 ## Data sources
 

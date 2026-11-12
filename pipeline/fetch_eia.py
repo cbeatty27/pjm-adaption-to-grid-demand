@@ -1,4 +1,4 @@
-"""Pull EIA data for the PJM balancing authority.
+"""Pull EIA data for the PJM balancing authority and for the United States.
 
 Outputs raw pulls into pipeline/cache/ (git-ignored) and a provenance record into
 pipeline/cache/provenance_eia.json. Run:  python -m pipeline.fetch_eia
@@ -8,6 +8,10 @@ Routes used (all EIA Open Data API v2):
   electricity/rto/region-data                EIA-930 PJM demand (type D)
   electricity/rto/region-sub-ba-data         EIA-930 PJM subregion demand
   electricity/rto/fuel-type-data             EIA-930 PJM net generation by fuel
+  electricity/operating-generator-capacity   (again, no balancing-authority filter) every U.S. generator
+  electricity/rto/region-data                EIA-930 U.S. Lower 48 demand (respondent US48)
+  electricity/rto/fuel-type-data             EIA-930 U.S. Lower 48 net generation by fuel (respondent US48)
+  electricity/retail-sales                   EIA retail electricity sales, U.S. total, by sector (optional)
 """
 from __future__ import annotations
 
@@ -28,6 +32,7 @@ ROUTE_GEN = "electricity/operating-generator-capacity"
 ROUTE_DEMAND = "electricity/rto/region-data"
 ROUTE_SUBBA = "electricity/rto/region-sub-ba-data"
 ROUTE_FUEL = "electricity/rto/fuel-type-data"
+ROUTE_RETAIL = "electricity/retail-sales"
 
 HOURLY_START = dt.date(2019, 1, 1)  # EIA-930 history used for context
 BASELINE_PERIOD = "2022-11"  # month of ChatGPT's public release (2022-11-30)
@@ -77,22 +82,25 @@ def pull_hourly(route: str, facets: dict, tag: str) -> pd.DataFrame:
     return out
 
 
-def pull_generators(prov: dict) -> None:
+def pull_generators(prov: dict, scope: str = "pjm") -> None:
+    """scope 'pjm' filters to balancing authority PJM; scope 'us' pulls every generator."""
     meta = eia.metadata(ROUTE_GEN)
     data_cols = list(meta["data"].keys())
     facet_ids = [f["id"] for f in meta.get("facets", [])]
-    prov["generators_meta"] = {
-        "startPeriod": meta.get("startPeriod"),
-        "endPeriod": meta.get("endPeriod"),
-        "frequency": [f.get("id") for f in meta.get("frequency", [])],
-        "data_columns": data_cols,
-        "facets": facet_ids,
-    }
-    print("generator data columns:", data_cols)
-    print("generator facets:", facet_ids)
-    if "balancing_authority_code" not in facet_ids:
-        raise eia.EIAError(f"balancing_authority_code facet missing; facets are {facet_ids}")
-    prov["generators_status_facet"] = eia.facet_values(ROUTE_GEN, "status")
+    pre = "generators" if scope == "pjm" else "generators_us"
+    if scope == "pjm":
+        prov["generators_meta"] = {
+            "startPeriod": meta.get("startPeriod"),
+            "endPeriod": meta.get("endPeriod"),
+            "frequency": [f.get("id") for f in meta.get("frequency", [])],
+            "data_columns": data_cols,
+            "facets": facet_ids,
+        }
+        print("generator data columns:", data_cols)
+        print("generator facets:", facet_ids)
+        if "balancing_authority_code" not in facet_ids:
+            raise eia.EIAError(f"balancing_authority_code facet missing; facets are {facet_ids}")
+        prov["generators_status_facet"] = eia.facet_values(ROUTE_GEN, "status")
 
     latest = meta["endPeriod"]
     base = BASELINE_PERIOD if BASELINE_PERIOD >= meta["startPeriod"] else meta["startPeriod"]
@@ -102,20 +110,48 @@ def pull_generators(prov: dict) -> None:
             "data[]": data_cols,
             "start": period,
             "end": period,
-            "facets[balancing_authority_code][]": "PJM",
             "sort[0][column]": "plantid",
             "sort[0][direction]": "asc",
+            "sort[1][column]": "generatorid",
+            "sort[1][direction]": "asc",
         }
+        if scope == "pjm":
+            params["facets[balancing_authority_code][]"] = "PJM"
         rows = eia.fetch_all(ROUTE_GEN, params)
         df = pd.DataFrame(rows)
-        df.to_csv(CACHE / f"generators_{label}.csv.gz", index=False, compression="gzip")
-        prov[f"generators_{label}"] = {"period": period, "rows": len(df)}
-        print(f"generators {label} ({period}): {len(df):,} rows")
+        df.to_csv(CACHE / f"{pre}_{label}.csv.gz", index=False, compression="gzip")
+        prov[f"{pre}_{label}"] = {"period": period, "rows": len(df)}
+        print(f"{pre} {label} ({period}): {len(df):,} rows", flush=True)
+
+
+def check_respondent(route: str, code: str) -> None:
+    ids = [str(v.get("id")) for v in eia.facet_values(route, "respondent")]
+    if code not in ids:
+        raise eia.EIAError(f"respondent {code} not listed for {route}; ids containing 'US': {[i for i in ids if 'US' in i]}")
+
+
+def pull_retail(prov: dict) -> None:
+    """Optional cross-check series: U.S. retail electricity sales by sector. Never stops the run."""
+    try:
+        params = {
+            "frequency": "monthly", "data[]": ["sales"], "start": "2019-01",
+            "facets[stateid][]": "US",
+            "sort[0][column]": "period", "sort[0][direction]": "asc",
+        }
+        rows = eia.fetch_all(ROUTE_RETAIL, params)
+        df = pd.DataFrame(rows)
+        df.to_csv(CACHE / "retail_us.csv.gz", index=False, compression="gzip")
+        prov["retail_us"] = {"route": ROUTE_RETAIL, "rows": len(df), "columns": list(df.columns)}
+        print(f"retail sales (US): {len(df):,} rows; columns {list(df.columns)}")
+    except Exception as e:  # noqa: BLE001
+        print(f"WARNING: retail sales pull skipped: {e}", file=sys.stderr)
+        prov["retail_us"] = {"error": str(e)[:300]}
 
 
 def main() -> int:
     prov: dict = {"retrieved_at_utc": dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds"), "routes": {}}
-    pull_generators(prov)
+    pull_generators(prov, "pjm")
+    pull_generators(prov, "us")
 
     # EIA-930 metadata (start/end periods + facets) for the record
     for name, route in (("demand", ROUTE_DEMAND), ("subba", ROUTE_SUBBA), ("fuel", ROUTE_FUEL)):
@@ -139,6 +175,19 @@ def main() -> int:
     sub = pull_hourly(ROUTE_SUBBA, {"parent": "PJM"}, "subba")
     sub.to_csv(CACHE / "subba_hourly.csv.gz", index=False, compression="gzip")
     prov["routes"]["subba"]["rows"] = len(sub)
+
+    # United States (Lower 48) series
+    check_respondent(ROUTE_DEMAND, "US48")
+    demand_us = pull_hourly(ROUTE_DEMAND, {"respondent": "US48", "type": "D"}, "demandus")
+    demand_us.to_csv(CACHE / "demand_us_hourly.csv.gz", index=False, compression="gzip")
+    prov["routes"]["demand_us"] = {"route": ROUTE_DEMAND, "respondent": "US48", "rows": len(demand_us)}
+
+    check_respondent(ROUTE_FUEL, "US48")
+    fuel_us = pull_hourly(ROUTE_FUEL, {"respondent": "US48"}, "fuelus")
+    fuel_us.to_csv(CACHE / "fuel_us_hourly.csv.gz", index=False, compression="gzip")
+    prov["routes"]["fuel_us"] = {"route": ROUTE_FUEL, "respondent": "US48", "rows": len(fuel_us)}
+
+    pull_retail(prov)
 
     (CACHE / "provenance_eia.json").write_text(json.dumps(prov, indent=2))
     print("done")

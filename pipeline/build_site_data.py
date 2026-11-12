@@ -1,7 +1,8 @@
 """Aggregate cached EIA pulls into the JSON the website reads.
 
 Reads  pipeline/cache/*.csv.gz  (from fetch_eia.py)
-Writes public/data/{plants,demand,fuelmix,meta}.json
+Writes public/data/{plants,demand,fuelmix,meta}.json for PJM and, when the U.S. pulls are cached,
+       public/data/{plants_us,demand_us,fuelmix_us,retail_us}.json
 
 No plant is labelled by who it serves. Fields are EIA's own; groups are a lookup of
 EIA's energy-source codes (see groups.py).
@@ -67,9 +68,11 @@ def to_ym(v: str) -> str | None:
     return None
 
 
-def build_plants(meta: dict) -> set[str]:
-    latest = read("generators_latest.csv.gz")
-    base = read("generators_baseline.csv.gz")
+def build_plants(meta: dict, scope: str = "pjm") -> set[str]:
+    us = scope == "us"
+    pre = "generators_us" if us else "generators"
+    latest = read(f"{pre}_latest.csv.gz")
+    base = read(f"{pre}_baseline.csv.gz")
     c = resolve(
         latest,
         plant=["plantid"], plantname=["plantname"], gen=["generatorid"], entity=["entityname"],
@@ -127,23 +130,30 @@ def build_plants(meta: dict) -> set[str]:
                 G.GEN_SOURCE.get(r[c["src"]].strip(), "other"),
                 float(r[c["mw"]] or 0)] for _, r in gone.iterrows()]
 
+    # The U.S. file is slimmed: no net-capacity columns, rounded coordinates, and EIA's status wording
+    # is kept once in meta.status_names instead of on every row.
     cols = ["plant", "gen", "name", "entity", "state", "county", "sector", "status", "statusdesc", "state_cls",
             "src", "group", "pm", "mw", "msum", "mwin", "lat", "lon", "online"]
+    if us:
+        cols = [k for k in cols if k not in ("msum", "mwin", "statusdesc")]
+        u = u.assign(lat=u["lat"].round(4), lon=u["lon"].round(4), mw=u["mw"].round(1))
+        meta["status_names"] = {k: v for k, v in zip(latest[c["status"]], latest[c["statusdesc"]] if c["statusdesc"] else latest[c["status"]])}
     rows = []
     for r in u[cols].itertuples(index=False):
         rows.append([None if (isinstance(x, float) and np.isnan(x)) else x for x in r])
-    payload = {
-        "columns": cols,
-        "units": rows,
-        "removed_since_baseline": {
-            "columns": ["plant", "gen", "name", "state", "group", "mw"],
-            "rows": removed,
-            "baseline_period": meta["generators_baseline"]["period"],
-        },
-    }
-    (OUT / "plants.json").write_text(json.dumps(payload, separators=(",", ":")))
-    meta["plants"] = {
-        "snapshot_period": meta["generators_latest"]["period"],
+    bp = meta[f"{pre}_baseline"]["period"]
+    if us:
+        summ: dict[str, dict] = {}
+        for r in removed:
+            e = summ.setdefault(r[4], {"n": 0, "mw": 0.0})
+            e["n"] += 1; e["mw"] = round(e["mw"] + r[5], 1)
+        rem = {"baseline_period": bp, "total": len(removed), "by_group": summ}
+    else:
+        rem = {"columns": ["plant", "gen", "name", "state", "group", "mw"], "rows": removed, "baseline_period": bp}
+    payload = {"columns": cols, "units": rows, "removed_since_baseline": rem}
+    (OUT / ("plants_us.json" if us else "plants.json")).write_text(json.dumps(payload, separators=(",", ":")))
+    meta["plants_us" if us else "plants"] = {
+        "snapshot_period": meta[f"{pre}_latest"]["period"],
         "units": int(len(u)),
         "units_without_coordinates_excluded": no_loc,
         "status_counts": u.groupby(["status", "statusdesc", "state_cls"]).size().reset_index(name="n").to_dict("records"),
@@ -174,19 +184,22 @@ def month_key(ts: pd.Series) -> pd.Series:
 
 # Reporting-error screen for hourly demand. EIA-930 contains impossible values (for example
 # 2,147,480,000 MW, the largest 32-bit integer). An hour is dropped when it is more than
-# OUT_HI times or less than OUT_LO times the median of the surrounding 7 days of the same
-# series. Dropped hours are listed in meta.json; nothing is filled in or estimated.
+# hi times or less than lo times the median of the surrounding 7 days of the same series.
+# PJM-wide and U.S. series are smooth, so they use a tight band; single zones swing more
+# (a small zone's hot-afternoon peak can reach 2.5 times its weekly median), so zones use a wide band.
+# Dropped hours are listed in meta.json; nothing is filled in or estimated.
 OUT_HI, OUT_LO, OUT_WINDOW = 1.5, 0.5, "7D"
+ZONE_HI, ZONE_LO = 3.0, 0.25
 # A month is used in charts and 12-month windows only when at least this share of its hours is present.
 MIN_COVERAGE = 0.95
 
 
-def drop_outlier_hours(df: pd.DataFrame, label: str) -> tuple[pd.DataFrame, list[dict]]:
+def drop_outlier_hours(df: pd.DataFrame, label: str, hi: float = OUT_HI, lo: float = OUT_LO) -> tuple[pd.DataFrame, list[dict]]:
     """df has unique `ts` (tz-aware) and numeric `val`. Returns (kept rows, dropped-hour records)."""
     df = df.sort_values("ts").reset_index(drop=True)
     s = pd.Series(df["val"].to_numpy(), index=df["ts"].dt.tz_convert("UTC"))
     med = s.rolling(OUT_WINDOW, center=True, min_periods=24).median()
-    bad = ((s > OUT_HI * med) | (s < OUT_LO * med)).to_numpy()
+    bad = ((s > hi * med) | (s < lo * med)).to_numpy()
     dropped = [
         {"series": label, "hour_et": df["ts"].iloc[i].strftime("%Y-%m-%d %H:00"),
          "value_mw": round(float(df["val"].iloc[i]), 1), "week_median_mw": round(float(med.iloc[i]), 1)}
@@ -195,13 +208,19 @@ def drop_outlier_hours(df: pd.DataFrame, label: str) -> tuple[pd.DataFrame, list
     return df.loc[~bad].copy(), dropped
 
 
-def build_demand(meta: dict) -> None:
-    d = hourly_et(read("demand_hourly.csv.gz"))
+def shift_month(ym: str, n: int) -> str:
+    return (pd.Period(ym) + n).strftime("%Y-%m")
+
+
+def build_demand(meta: dict, scope: str = "pjm") -> None:
+    us = scope == "us"
+    label = "US48" if us else "PJM"
+    d = hourly_et(read("demand_us_hourly.csv.gz" if us else "demand_hourly.csv.gz"))
     n_all = len(d)
     d = d.dropna(subset=["val"])
     nonpos = int((d["val"] <= 0).sum())
     d = d[d["val"] > 0].drop_duplicates(subset="ts")
-    d, dropped = drop_outlier_hours(d, "PJM")
+    d, dropped = drop_outlier_hours(d, label)
     d["m"] = month_key(d["ts"])
     agg = d.groupby("m")["val"].agg(avg="mean", peak="max", low="min", n="count", total="sum").reset_index()
     agg["exp"] = agg["m"].map(expected_hours)
@@ -216,15 +235,17 @@ def build_demand(meta: dict) -> None:
         "coverage": agg["cov"].tolist(),
     }
 
-    # subregions (zones)
-    s = read("subba_hourly.csv.gz")
+    # subregions (zones) exist for PJM only
     zones = {}
+    s = pd.DataFrame()
+    if not us:
+        s = read("subba_hourly.csv.gz")
     if len(s):
         s = hourly_et(s).dropna(subset=["val"])
         s = s[s["val"] > 0].drop_duplicates(subset=["ts", "subba"])
         kept = []
         for z, gz in s.groupby("subba"):
-            gz, dz = drop_outlier_hours(gz, str(z))
+            gz, dz = drop_outlier_hours(gz, str(z), ZONE_HI, ZONE_LO)
             kept.append(gz)
             dropped += dz
         s = pd.concat(kept, ignore_index=True)
@@ -243,16 +264,25 @@ def build_demand(meta: dict) -> None:
     def window_stats(frame: pd.DataFrame, lo: str, hi: str):
         w = frame[(frame["m"] >= lo) & (frame["m"] <= hi)]
         return {"avg_mw": round(float(w["val"].mean()), 1), "peak_mw": round(float(w["val"].max()), 1),
-                "min_mw": round(float(w["val"].min()), 1), "hours": int(len(w))}
+                "min_mw": round(float(w["val"].min()), 1), "hours": int(len(w)),
+                "twh": round(float(w["val"].sum()) / 1e6, 2)}
 
     full = agg[agg["cov"] >= MIN_COVERAGE]["m"].tolist()
     latest_hi = full[-1]
-    latest_lo = (pd.Period(latest_hi) - 11).strftime("%Y-%m")
+    latest_lo = shift_month(latest_hi, -11)
     comparison = {
         "baseline": {"from": BASE_WINDOW[0], "to": BASE_WINDOW[1], **window_stats(d, *BASE_WINDOW)},
         "latest": {"from": latest_lo, "to": latest_hi, **window_stats(d, latest_lo, latest_hi)},
         "zones": {},
     }
+    # the same 12-month window one to five years earlier, when the data reach that far back
+    five = {}
+    for k in range(1, 6):
+        lo_k, hi_k = shift_month(latest_lo, -12 * k), shift_month(latest_hi, -12 * k)
+        if lo_k >= months[0] and agg[(agg["m"] >= lo_k) & (agg["m"] <= hi_k)]["cov"].ge(MIN_COVERAGE).all() and \
+                len(agg[(agg["m"] >= lo_k) & (agg["m"] <= hi_k)]) == 12:
+            five[str(k)] = {"from": lo_k, "to": hi_k, **window_stats(d, lo_k, hi_k)}
+    comparison["years_earlier"] = five
     if len(s):
         for z, gz in s.groupby("subba"):
             b = window_stats(gz, *BASE_WINDOW) if (gz["m"].between(*BASE_WINDOW)).any() else None
@@ -261,21 +291,26 @@ def build_demand(meta: dict) -> None:
                 comparison["zones"][z] = {"baseline": b, "latest": l}
 
     out = {"monthly": monthly, "zones": zones, "comparison": comparison, "tz": TZ}
-    (OUT / "demand.json").write_text(json.dumps(out, separators=(",", ":")))
-    meta["demand"] = {
+    (OUT / ("demand_us.json" if us else "demand.json")).write_text(json.dumps(out, separators=(",", ":")))
+    meta["demand_us" if us else "demand"] = {
         "hourly_rows": n_all, "non_positive_rows_dropped": nonpos, "months": len(months),
         "min_coverage": MIN_COVERAGE,
-        "outlier_rule": {"high_x_median": OUT_HI, "low_x_median": OUT_LO, "window": "centered 7 days, same series"},
+        "outlier_rule": {
+            "series": {"high_x_median": OUT_HI, "low_x_median": OUT_LO},
+            "zones": {"high_x_median": ZONE_HI, "low_x_median": ZONE_LO},
+            "window": "centered 7 days, same series",
+        },
         "outlier_hours_dropped": len(dropped),
-        "outlier_hours_dropped_pjm": sum(1 for r in dropped if r["series"] == "PJM"),
+        "outlier_hours_dropped_pjm": sum(1 for r in dropped if r["series"] == label),
         "outlier_hours": dropped[:400],
         "first_month": months[0], "last_month": months[-1], "zones": sorted(zones),
         "partial_months": [m for m, c in zip(months, monthly["coverage"]) if c < MIN_COVERAGE],
     }
 
 
-def build_fuel(meta: dict) -> None:
-    f = hourly_et(read("fuel_hourly.csv.gz")).dropna(subset=["val"])
+def build_fuel(meta: dict, scope: str = "pjm") -> None:
+    us = scope == "us"
+    f = hourly_et(read("fuel_us_hourly.csv.gz" if us else "fuel_hourly.csv.gz")).dropna(subset=["val"])
     f = f.drop_duplicates(subset=["ts", "fueltype"])
     f["group"] = f["fueltype"].map(lambda c: G.FUEL930.get(c, "other"))
     unmapped = sorted(set(f.loc[~f["fueltype"].isin(G.FUEL930), "fueltype"]))
@@ -295,7 +330,7 @@ def build_fuel(meta: dict) -> None:
     }
     full = [m for m, c in zip(months, cov) if c >= MIN_COVERAGE]
     hi = full[-1]
-    lo = (pd.Period(hi) - 11).strftime("%Y-%m")
+    lo = shift_month(hi, -11)
 
     def win(a, b):
         w = mg.loc[(mg.index >= a) & (mg.index <= b)].sum()
@@ -305,17 +340,47 @@ def build_fuel(meta: dict) -> None:
         "baseline": {"from": BASE_WINDOW[0], "to": BASE_WINDOW[1], "gwh": win(*BASE_WINDOW)},
         "latest": {"from": lo, "to": hi, "gwh": win(lo, hi)},
     }
-    (OUT / "fuelmix.json").write_text(json.dumps(out, separators=(",", ":")))
-    meta["fuel"] = {"min_coverage": MIN_COVERAGE, "hourly_rows": int(len(f)), "codes_unmapped": unmapped, "first_month": months[0], "last_month": months[-1]}
+    (OUT / ("fuelmix_us.json" if us else "fuelmix.json")).write_text(json.dumps(out, separators=(",", ":")))
+    meta["fuel_us" if us else "fuel"] = {"min_coverage": MIN_COVERAGE, "hourly_rows": int(len(f)), "codes_unmapped": unmapped, "first_month": months[0], "last_month": months[-1]}
+
+
+def build_retail(meta: dict) -> None:
+    """EIA retail electricity sales, U.S. total, by sector (monthly, million kWh = GWh). Optional."""
+    if not (CACHE / "retail_us.csv.gz").exists():
+        return
+    df = read("retail_us.csv.gz")
+    if not len(df):
+        return
+    c = resolve(df, period=["period"], sid=["sectorid"], sname=["sectorname"], sales=["sales"])
+    if not (c["period"] and c["sid"] and c["sales"]):
+        print(f"retail sales skipped: columns not recognised ({list(df.columns)})")
+        return
+    df["v"] = pd.to_numeric(df[c["sales"]], errors="coerce")
+    pv = df.pivot_table(index=c["period"], columns=c["sid"], values="v", aggfunc="sum").sort_index()
+    names = df.drop_duplicates(c["sid"]).set_index(c["sid"])[c["sname"]].to_dict() if c["sname"] else {}
+    out = {
+        "months": pv.index.tolist(),
+        "sectors": {k: {"name": names.get(k, k), "gwh": [None if pd.isna(v) else round(float(v), 1) for v in pv[k]]} for k in pv.columns},
+        "unit": "million kilowatthours (GWh)",
+    }
+    (OUT / "retail_us.json").write_text(json.dumps(out, separators=(",", ":")))
+    meta["retail_us"] = {"route": "electricity/retail-sales", "first_month": out["months"][0], "last_month": out["months"][-1], "sectors": sorted(pv.columns)}
 
 
 def main() -> int:
     OUT.mkdir(parents=True, exist_ok=True)
     meta = json.loads((CACHE / "provenance_eia.json").read_text())
-    meta["generators_latest"] = meta.pop("generators_latest")
-    states = build_plants(meta)
-    build_demand(meta)
-    build_fuel(meta)
+    states = build_plants(meta, "pjm")
+    build_demand(meta, "pjm")
+    build_fuel(meta, "pjm")
+    has_us = (CACHE / "generators_us_latest.csv.gz").exists() and (CACHE / "demand_us_hourly.csv.gz").exists()
+    if has_us:
+        build_plants(meta, "us")
+        build_demand(meta, "us")
+        build_fuel(meta, "us")
+        build_retail(meta)
+    else:
+        print("U.S. pulls not in the cache; building PJM files only. Run fetch_eia again to add the U.S. tabs.")
     dc = json.loads((OUT / "datacenters.json").read_text())["meta"]
     meta.update({
         "built_at_utc": dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds"),
@@ -323,11 +388,12 @@ def main() -> int:
         "baseline_window": list(BASE_WINDOW),
         "groups": [{"key": k, "label": v} for k, v in G.GROUPS],
         "pjm_states_with_eia_plants": sorted(states),
+        "has_us": has_us,
         "im3": dc,
         "synthetic": SYNTHETIC,
     })
     (OUT / "meta.json").write_text(json.dumps(meta, indent=2))
-    print("wrote", [p.name for p in OUT.iterdir()])
+    print("wrote", sorted(p.name for p in OUT.iterdir()))
     return 0
 
 

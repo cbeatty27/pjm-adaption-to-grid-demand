@@ -50,13 +50,23 @@ function tintBasemap(map) {
   }
 }
 
-export async function mount(root, data) {
-  const { meta, units, dcs } = data;
+// The same map for two scopes. scope 'pjm': generators reporting PJM as their balancing authority and the
+// IM3 records in states where EIA lists PJM generators (optional). scope 'us': every EIA generator in the
+// 50 states and every IM3 record.
+export function mount(root, data) {
+  return mountMap(root, data, { scope: 'pjm', units: data.units, snapshot: data.meta.plants.snapshot_period, statusNames: {} });
+}
+
+export async function mountMap(root, data, opt) {
+  const { meta, dcs } = data;
+  const US = opt.scope === 'us';
+  const units = opt.units;
   const groups = meta.groups; // [{key,label}]
   const WIN = ymIndex(meta.window_start.slice(0, 7)); // month containing the ChatGPT release
-  const LATEST = ymIndex(meta.plants.snapshot_period);
+  const LATEST = ymIndex(opt.snapshot);
   const N = LATEST - WIN; // months on the timeline: WIN+1 .. LATEST
   const pjmStates = new Set(meta.pjm_states_with_eia_plants);
+  const scopeName = US ? 'U.S.' : 'PJM-area';
 
   // ---- classify units (EIA's own status text; nothing inferred) ----
   const op = units.filter((u) => u.state_cls === 'operating');
@@ -75,7 +85,7 @@ export async function mount(root, data) {
 
   root.innerHTML = `
     <div class="mapview">
-      <div class="mapview__map"><div id="map" role="application" aria-label="Map of PJM-area generators and IM3 data center records"></div><div class="map-note" id="mapnote" hidden></div></div>
+      <div class="mapview__map"><div id="map" role="application" aria-label="Map of ${scopeName} generators and IM3 data center records"></div><div class="map-note" id="mapnote" hidden></div></div>
       <aside class="mapview__side" aria-label="Summary and layers">
         <section class="side__section" aria-live="polite">
           <h2 id="sumTitle"></h2>
@@ -89,12 +99,12 @@ export async function mount(root, data) {
             <label class="check"><input type="checkbox" id="lyFleet"><span>Generators online before the window<small>EIA operating units with an operating month up to ${esc(ymLabel(indexYm(WIN)))}, drawn faintly for context.</small></span></label>
             <label class="check"><input type="checkbox" id="lyDc" checked><span>Data center records (IM3, static)<small>IM3 has no online date, so these do not move with the slider. Footprint area sets symbol size; the shape shows the record type.</small></span></label>
             <div class="chips" id="dcTypes" role="group" aria-label="IM3 record types"></div>
-            <label class="check"><input type="checkbox" id="dcPjm" checked><span>Only states where EIA lists PJM generators<small>State level, so it includes parts of states outside PJM. No boundary file is used.</small></span></label>
+            ${US ? '' : `<label class="check"><input type="checkbox" id="dcPjm" checked><span>Limit to states where EIA lists PJM generators<small>Records in other states are hidden while this is on, including New York (and Manhattan). Turn it off to see every U.S. record. State level only: it includes parts of states outside PJM, and no boundary file is used.</small></span></label>`}
           </div>
           <p class="side__sub" id="dcCount"></p>
         </section>
         <section class="side__section side__fine">
-          <p><strong>What the dots show.</strong> Each generator is one EIA-860M unit reporting PJM as its balancing authority, placed at the plant's EIA coordinates. EIA does not report whether a generator serves the grid or a particular customer, so this map does not label that.</p>
+          <p><strong>What the dots show.</strong> Each generator is one EIA-860M unit ${US ? 'in the 50 states' : 'reporting PJM as its balancing authority'}, placed at the plant's EIA coordinates. EIA does not report whether a generator serves the grid or a particular customer, so this map does not label that.</p>
           <p id="sideCaveats"></p>
         </section>
       </aside>
@@ -118,11 +128,11 @@ export async function mount(root, data) {
     </div>`;
 
   const $ = (id) => root.querySelector(`#${id}`);
-  $('sideCaveats').innerHTML = `Source: EIA Open Data API, generator inventory snapshot ${esc(meta.plants.snapshot_period)}. ${nf0.format(undated)} operating units report no operating month and ${nf0.format(planned)} units are planned or under construction; neither appears on the timeline.`;
+  $('sideCaveats').innerHTML = `Source: EIA Open Data API, generator inventory snapshot ${esc(opt.snapshot)}. ${nf0.format(undated)} operating units report no operating month and ${nf0.format(planned)} units are planned or under construction; neither appears on the timeline.`;
 
   // ---- map ----
   const { style, ok } = await pickStyle();
-  const map = new maplibregl.Map({ container: 'map', style, center: [-79.5, 39.8], zoom: 5.2, attributionControl: { compact: true } });
+  const map = new maplibregl.Map({ container: 'map', style, center: US ? [-96.5, 38.6] : [-79.5, 39.8], zoom: US ? 3.4 : 5.2, attributionControl: { compact: true } });
   map.addControl(new maplibregl.NavigationControl({ showCompass: false }), 'top-left');
   if (!ok) { const n = $('mapnote'); n.hidden = false; n.textContent = 'The basemap could not be loaded. Data layers still work.'; }
 
@@ -134,7 +144,11 @@ export async function mount(root, data) {
   const byFleet = new Map(fleetUnits.map((u) => [`${u.plant}|${u.gen}`, u]));
 
   const colorExpr = ['match', ['get', 'group'], ...groups.flatMap((g) => [g.key, FUEL_COLOR[g.key] || FUEL_COLOR.other]), FUEL_COLOR.other];
-  const radius = (k) => ['interpolate', ['linear'], ['sqrt', ['max', ['get', 'mw'], 0]], 0, 2.5 * k, 12, 6 * k, 32, 12 * k];
+  const radiusAt = (k) => ['interpolate', ['linear'], ['sqrt', ['max', ['get', 'mw'], 0]], 0, 2.5 * k, 12, 6 * k, 32, 12 * k];
+  // On the U.S. map the dots shrink when zoomed out so the dense East stays readable.
+  const radius = (k) => (US ? ['interpolate', ['linear'], ['zoom'], 3, radiusAt(k * 0.42), 7, radiusAt(k)] : radiusAt(k));
+  const iconSizeAt = (k) => ['interpolate', ['linear'], ['sqrt', ['max', ['get', 'sqft'], 0]], 0, 0.34 * k, 500, 0.46 * k, 2000, 0.62 * k, 6000, 0.9 * k];
+  const iconSize = US ? ['interpolate', ['linear'], ['zoom'], 3, iconSizeAt(0.6), 7, iconSizeAt(1)] : iconSizeAt(1);
 
   function applyFilters() {
     if (!map.getLayer('win')) return;
@@ -145,7 +159,7 @@ export async function mount(root, data) {
     map.setFilter('fleet', fuel);
     map.setLayoutProperty('fleet', 'visibility', state.showFleet ? 'visible' : 'none');
     const dcF = ['all', ['in', ['get', 'type'], ['literal', [...state.dcTypes]]]];
-    if (state.dcPjmOnly) dcF.push(['in', ['get', 'st'], ['literal', [...pjmStates]]]);
+    if (!US && state.dcPjmOnly) dcF.push(['in', ['get', 'st'], ['literal', [...pjmStates]]]);
     map.setFilter('dc', dcF);
     map.setLayoutProperty('dc', 'visibility', state.showDc ? 'visible' : 'none');
   }
@@ -159,12 +173,14 @@ export async function mount(root, data) {
     map.addLayer({ id: 'fleet', type: 'circle', source: 'fleet', paint: { 'circle-color': colorExpr, 'circle-opacity': 0.3, 'circle-radius': radius(0.8) } });
     map.addLayer({
       id: 'dc', type: 'symbol', source: 'dc',
-      layout: { 'icon-image': ['match', ['get', 'type'], 'campus', 'dc-campus', 'point', 'dc-point', 'dc-building'], 'icon-allow-overlap': true, 'icon-size': ['interpolate', ['linear'], ['sqrt', ['max', ['get', 'sqft'], 0]], 0, 0.34, 500, 0.46, 2000, 0.62, 6000, 0.9] },
+      layout: { 'icon-image': ['match', ['get', 'type'], 'campus', 'dc-campus', 'point', 'dc-point', 'dc-building'], 'icon-allow-overlap': true, 'icon-size': iconSize },
     });
     map.addLayer({ id: 'win', type: 'circle', source: 'win', paint: { 'circle-color': colorExpr, 'circle-opacity': 0.94, 'circle-radius': radius(1), 'circle-stroke-color': '#ffffff', 'circle-stroke-width': 1.2 } });
 
     const pts = units.filter((u) => u.lat != null && u.lon != null);
-    if (pts.length) {
+    if (US) {
+      map.fitBounds([[-125.5, 24.2], [-66.5, 49.6]], { padding: { top: 20, left: 20, right: 20, bottom: 40 }, animate: false });
+    } else if (pts.length) {
       const b = new maplibregl.LngLatBounds();
       pts.forEach((u) => b.extend([u.lon, u.lat]));
       map.fitBounds(b, { padding: { top: 30, left: 30, right: 30, bottom: 50 }, animate: false, maxZoom: 8 });
@@ -178,7 +194,7 @@ export async function mount(root, data) {
       <tr><td>Energy source</td><td>${esc(u.src)} (${esc(groups.find((g) => g.key === u.group)?.label)})</td></tr>
       <tr><td>Nameplate</td><td>${esc(fmtMw(u.mw))}</td></tr>
       <tr><td>Operating month</td><td>${esc(u.online ? ymLabel(u.online) : 'not reported')}</td></tr>
-      <tr><td>EIA status</td><td>${esc(u.statusdesc || u.status)}</td></tr>
+      <tr><td>EIA status</td><td>${esc(u.statusdesc || opt.statusNames[u.status] || u.status)}</td></tr>
       <tr><td>EIA sector</td><td>${esc(u.sector || 'n/a')}</td></tr>
       <tr><td>Owner</td><td>${esc(u.entity || 'n/a')}</td></tr>
       <tr><td>Location</td><td>${esc([u.county, u.state].filter(Boolean).join(', '))}</td></tr></table>
@@ -232,7 +248,7 @@ export async function mount(root, data) {
   });
 
   function updateDcCount() {
-    const n = dcs.filter((d) => state.dcTypes.has(d.type) && (!state.dcPjmOnly || pjmStates.has(d.state_abb))).length;
+    const n = dcs.filter((d) => state.dcTypes.has(d.type) && (US || !state.dcPjmOnly || pjmStates.has(d.state_abb))).length;
     $('dcCount').textContent = state.showDc ? `${nf0.format(n)} IM3 records shown (of ${nf0.format(dcs.length)}). A campus and the buildings inside it are separate records, so this is not a count of facilities.` : '';
   }
   $('dcTypes').innerHTML = ['building', 'campus', 'point'].map((t) => `<button class="chip" type="button" data-type="${t}" aria-pressed="true">${dcGlyph(t)}${t}</button>`).join('');
@@ -243,7 +259,7 @@ export async function mount(root, data) {
   });
   $('lyFleet').addEventListener('change', (e) => { state.showFleet = e.target.checked; applyFilters(); });
   $('lyDc').addEventListener('change', (e) => { state.showDc = e.target.checked; applyFilters(); updateDcCount(); });
-  $('dcPjm').addEventListener('change', (e) => { state.dcPjmOnly = e.target.checked; applyFilters(); updateDcCount(); });
+  $('dcPjm')?.addEventListener('change', (e) => { state.dcPjmOnly = e.target.checked; applyFilters(); updateDcCount(); });
 
   // ---- ruler (timeline) ----
   const ruler = $('ruler'), svg = $('rulerSvg');
