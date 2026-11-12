@@ -47,6 +47,24 @@ def read(name: str) -> pd.DataFrame:
     return pd.read_csv(CACHE / name, dtype=str, keep_default_na=False)
 
 
+def read_hourly(name: str) -> pd.DataFrame:
+    """The API pull, with EIA's bulk-file hours (fetch_eia930_bulk.py) placed in front of its first hour.
+
+    The API serves hourly EIA-930 data from 2019-01-01. The bulk files cover the earlier hours; only hours
+    before the API's first hour are taken from them, so no hour is counted twice.
+    """
+    df = read(name)
+    f = CACHE / f"bulk930_{name}"
+    if not f.exists() or df.empty:
+        return df
+    b = pd.read_csv(f, dtype=str, keep_default_na=False)
+    b = b[b["period"] < df["period"].min()]
+    for c in df.columns:
+        if c not in b.columns:
+            b[c] = ""
+    return pd.concat([b[df.columns], df], ignore_index=True)
+
+
 def classify_status(code: str, desc: str) -> str:
     d = (desc or "").lower()
     if "operating" in d or code == "OP":
@@ -217,7 +235,7 @@ def shift_month(ym: str, n: int) -> str:
 def build_demand(meta: dict, scope: str = "pjm") -> None:
     us = scope == "us"
     label = "US48" if us else "PJM"
-    d = hourly_et(read("demand_us_hourly.csv.gz" if us else "demand_hourly.csv.gz"))
+    d = hourly_et(read_hourly("demand_us_hourly.csv.gz" if us else "demand_hourly.csv.gz"))
     n_all = len(d)
     d = d.dropna(subset=["val"])
     nonpos = int((d["val"] <= 0).sum())
@@ -325,7 +343,7 @@ def build_demand(meta: dict, scope: str = "pjm") -> None:
 
 def build_fuel(meta: dict, scope: str = "pjm") -> None:
     us = scope == "us"
-    f = hourly_et(read("fuel_us_hourly.csv.gz" if us else "fuel_hourly.csv.gz")).dropna(subset=["val"])
+    f = hourly_et(read_hourly("fuel_us_hourly.csv.gz" if us else "fuel_hourly.csv.gz")).dropna(subset=["val"])
     f = f.drop_duplicates(subset=["ts", "fueltype"])
     f["group"] = f["fueltype"].map(lambda c: G.FUEL930.get(c, "other"))
     unmapped = sorted(set(f.loc[~f["fueltype"].isin(G.FUEL930), "fueltype"]))
@@ -414,12 +432,12 @@ def build_explorer(meta: dict, scope: str = "pjm") -> None:
     other charts; generation hours are as reported except for impossible values (see GEN_GUARD). Nothing is filled in."""
     us = scope == "us"
     label = "US48" if us else "PJM"
-    d = hourly_et(read("demand_us_hourly.csv.gz" if us else "demand_hourly.csv.gz")).dropna(subset=["val"])
+    d = hourly_et(read_hourly("demand_us_hourly.csv.gz" if us else "demand_hourly.csv.gz")).dropna(subset=["val"])
     d = d[d["val"] > 0].drop_duplicates(subset="ts")
     d, _ = drop_outlier_hours(d, label)
     dem = pd.Series(d["val"].to_numpy(), index=d["ts"].dt.tz_convert("UTC")).sort_index()
 
-    f = hourly_et(read("fuel_us_hourly.csv.gz" if us else "fuel_hourly.csv.gz")).dropna(subset=["val"])
+    f = hourly_et(read_hourly("fuel_us_hourly.csv.gz" if us else "fuel_hourly.csv.gz")).dropna(subset=["val"])
     f = f.drop_duplicates(subset=["ts", "fueltype"])
     dropped = []
     keep = pd.Series(True, index=f.index)
@@ -682,6 +700,10 @@ def main() -> int:
         print("U.S. pulls not in the cache; building PJM files only. Run fetch_eia again to add the U.S. tabs.")
     build_retired(meta)
     dc = json.loads((OUT / "datacenters.json").read_text())["meta"]
+    bp = CACHE / "provenance_bulk930.json"
+    if bp.exists() and any((CACHE / f"bulk930_{n}").exists() for n in ("demand_hourly.csv.gz", "demand_us_hourly.csv.gz")):
+        meta["bulk930"] = json.loads(bp.read_text())
+        meta["bulk930"]["files_present"] = sorted(p.name for p in CACHE.glob("bulk930_*.csv.gz"))
     meta.update({
         "built_at_utc": dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds"),
         "window_start": WINDOW_START,

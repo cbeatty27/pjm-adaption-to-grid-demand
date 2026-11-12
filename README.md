@@ -8,7 +8,7 @@ The site has six tabs: U.S. demand (the Lower 48 total, ten-year and five-year g
 
 Only two datasets supply data (EIA includes the optional EIA-923 monthly generation series). Details, fields and limits are on the site's Sources tab.
 
-1. **EIA Open Data API v2** (`api.eia.gov`): generator inventory (`electricity/operating-generator-capacity`, EIA-860M based) and EIA-930 PJM demand, subregion demand and fuel mix (`electricity/rto/*`).
+1. **EIA Open Data API v2** (`api.eia.gov`): generator inventory (`electricity/operating-generator-capacity`, EIA-860M based) and EIA-930 PJM demand, subregion demand and fuel mix (`electricity/rto/*`, which the API serves from 2019); the hours before that (demand from July 2015, fuel mix from July 2018) come from EIA's six-month EIA-930 Balance files via `python3 -m pipeline.fetch_eia930_bulk`.
 2. **IM3 Open Source Data Center Atlas** (PNNL, DOI 10.57931/2550666, ODbL), file version 2026.11.02, in `data/raw/im3/`.
 
 Also used, but not data: OpenFreeMap vector tiles for the map background; MapLibre GL JS, Chart.js, Vite and IBM Plex (bundled); GitHub Actions and Pages.
@@ -25,6 +25,7 @@ Also used, but not data: OpenFreeMap vector tiles for the map background; MapLib
 pip install -r pipeline/requirements.txt
 export EIA_API_KEY=...            # never commit this
 python -m pipeline.fetch_eia      # pulls EIA data into pipeline/cache (git-ignored)
+python -m pipeline.fetch_eia930_bulk   # adds EIA-930 hours before 2019 from EIA's six-month files
 python -m pipeline.build_datacenters
 python -m pipeline.build_site_data
 python -m pipeline.validate

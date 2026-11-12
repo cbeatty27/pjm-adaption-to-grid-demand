@@ -52,6 +52,7 @@ jobs:
         run: |
           pip install -r pipeline/requirements.txt
           python -m pipeline.fetch_eia
+          python -m pipeline.fetch_eia930_bulk
           python -m pipeline.build_datacenters
           python -m pipeline.build_site_data
           python -m pipeline.validate
