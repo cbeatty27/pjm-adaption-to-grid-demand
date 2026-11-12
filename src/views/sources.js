@@ -1,6 +1,12 @@
 import { esc, nf0, ymLabel } from '../lib/format.js';
 
 const row = (k, v) => `<dt>${k}</dt><dd>${v}</dd>`;
+// EIA's own names for the EIA-930 fuel codes, as returned by the API in this build
+function codeNameList(meta) {
+  const one = (label, b) => (b?.code_names && Object.keys(b.code_names).length
+    ? `<li>${label} fuel codes as EIA names them: ${Object.entries(b.code_names).map(([c, n]) => `<code>${esc(c)}</code> ${esc(n)} (${esc(b.code_groups?.[c] || 'other')})`).join('; ')}.</li>` : '');
+  return one('PJM', meta.fuel) + one('U.S.', meta.fuel_us);
+}
 
 export function mount(root, { meta, dcMeta }) {
   const r = meta.routes || {};
@@ -34,10 +40,10 @@ export function mount(root, { meta, dcMeta }) {
     <section class="src"><h3>2. EIA Open Data API, demand and fuel mix (EIA-930), PJM and the U.S. Lower 48</h3><dl>
       ${row('What it is', 'Hourly operating data that balancing authorities, including PJM, report to EIA on Form EIA-930.')}
       ${row('Routes', `<code>electricity/rto/region-data</code> (demand, type D); <code>electricity/rto/region-sub-ba-data</code> (PJM subregions); <code>electricity/rto/fuel-type-data</code> (net generation by fuel). Respondent: PJM for the PJM tabs and US48 (EIA's Lower 48 total) for the U.S. tabs. Subregions: parent PJM.`)}
-      ${row('Period', `Hourly from 2019-01-01. Demand months ${esc(meta.demand?.first_month || '')} to ${esc(meta.demand?.last_month || '')}.`)}
-      ${row('How it is used', 'Hours are grouped into months in Eastern time. Demand: monthly highest, average and lowest hour. Fuel mix: monthly GWh per fuel group. The case study compares two 12-month windows (' + esc((meta.baseline_window || []).join(' to ')) + ' and the latest 12 complete months). The U.S. page also compares windows one to five years before the latest one. Energy used is the sum of hourly demand in the window, in TWh.')}
+      ${row('Period', `Demand: every hour EIA has, from July 2015, when EIA-930 began (months ${esc(meta.demand?.first_month || '')} to ${esc(meta.demand?.last_month || '')}). Fuel mix: hourly from July 2018, the start of that series (months ${esc(meta.fuel?.first_month || '')} to ${esc(meta.fuel?.last_month || '')}). PJM subregions (zones): hourly from 2019-01-01.`)}
+      ${row('How it is used', 'Hours are grouped into months in Eastern time. Demand: monthly highest, average and lowest hour. Fuel mix: monthly GWh per fuel group. Daily values are the mean and maximum of each Eastern-time day that has at least ' + esc(String(meta.demand?.daily_min_hours ?? 20)) + ' hours of data. Both demand pages compare the latest 12 complete months with the 12 months before ChatGPT (' + esc((meta.baseline_window || []).join(' to ')) + ') and with the same 12 months one to ten years earlier, as far back as the data allow. The charts plot every month and day in order and do not line up one calendar month against the same month in other years. Energy used is the sum of hourly demand in the window, in TWh.')}
       ${row('Cleaning', `Hours with a non-positive demand value are dropped and counted (${nf0.format(meta.demand?.non_positive_rows_dropped ?? 0)} for PJM${US ? `, ${nf0.format(du.non_positive_rows_dropped ?? 0)} for the U.S.` : ''}). EIA-930 also contains impossible reported values (one hour reads 2,147,480,000 MW). An hour is dropped when it is more than ${rule.series.high_x_median} times or less than ${rule.series.low_x_median} times the median of the surrounding 7 days of the same series. Zone series use a wider band (above ${rule.zones.high_x_median} times or below ${rule.zones.low_x_median} times) because small zones have larger real swings. These are rules of this site and not EIA flags. ${nf0.format(meta.demand?.outlier_hours_dropped_pjm ?? 0)} PJM-wide hours${US ? ` and ${nf0.format(du.outlier_hours_dropped_pjm ?? 0)} U.S. hours` : ''} were dropped, ${nf0.format(meta.demand?.outlier_hours_dropped ?? 0)} counting zones, and the first 400 are listed in <code>data/meta.json</code>. Duplicate hours are removed. Months with under ${Math.round((meta.demand?.min_coverage ?? 0.95) * 100)}% of expected hours are excluded from charts. Nothing is filled in or estimated.`)}
-      ${row('Caution', 'The Lower 48 total adds up the balancing authorities that report to EIA-930. If which authorities report, or how they report, changed over the period, that would show up in the total. The retail sales series (source 3) comes from a different survey and is a separate check.')}
+      ${row('Caution', 'The Lower 48 total adds up the balancing authorities that report to EIA-930, which began collecting in July 2015, so the oldest windows come from the survey\'s first year or so. If which authorities report, or how they report, changed over the period, that would show up in the total. The retail sales series (source 3) comes from a different survey and is a separate check.')}
       ${row('Why not PJM directly', 'PJM\'s own Data Miner service was not used. PJM figures here are PJM\'s reports to EIA.')}
     </dl></section>
 
@@ -53,7 +59,7 @@ export function mount(root, { meta, dcMeta }) {
     ${US ? `<section class="src"><h3>3. EIA Open Data API, retail electricity sales</h3><dl>
       ${row('What it is', 'Electricity sold to customers by sector, from EIA\'s monthly electric power survey (Form EIA-861M).')}
       ${row('Route', '<code>electricity/retail-sales</code>, U.S. total (state id US), sectors residential, commercial, industrial, transportation and other where EIA reports them. Unit: million kilowatt-hours (GWh), shown as TWh.')}
-      ${row('How it is used', 'A second measure of demand growth on the U.S. demand page: 12-month totals by sector and the change over five years. It is published later than hourly data, so its latest window ends earlier.')}
+      ${row('How it is used', 'A second measure of demand growth on the U.S. demand page: 12-month totals by sector, back as far as ten years from the latest window, and the change over the first five and the last five of those years. It is published later than hourly data, so its latest window ends earlier.')}
       ${row('Not done', 'EIA has no data center sector. The chart does not allocate any sales to data centers.')}
     </dl></section>` : ''}
 
@@ -79,7 +85,9 @@ export function mount(root, { meta, dcMeta }) {
     <p>EIA energy source codes in the generator inventory map to groups as follows. Everything not listed falls in Other, including oil, biomass, geothermal and waste heat.</p>
     <ul>
       <li>Natural gas: <code>NG</code>. Coal: <code>BIT, SUB, LIG, ANT, RC, WC, SGC</code>. Nuclear: <code>NUC</code>. Solar: <code>SUN</code>. Wind: <code>WND</code>. Hydro: <code>WAT</code>. Storage: <code>MWH</code>.</li>
-      <li>EIA-930 fuel types: <code>NG, COL, NUC, SUN, WND, WAT</code> map to the groups above; <code>BAT, PS, ESS</code> to Storage; <code>OIL, OTH, GEO, BIO, UNK</code> to Other.</li>
+      <li>EIA-930 fuel types: <code>NG, COL, NUC, SUN, WND, WAT</code> map to the groups above; <code>BAT, PS, ESS</code> to Storage; <code>OIL, OTH, GEO, BIO, UNK</code> to Other. Four codes EIA added in 2025 follow EIA's own names: <code>OES</code> (other energy storage) and <code>UES</code> (unknown energy storage) to Storage, <code>SNB</code> (solar with integrated battery storage) to Solar and <code>WNB</code> (wind with integrated battery storage) to Wind. A code not in this list falls in Other and is listed in <code>data/meta.json</code>.</li>
+      <li>Storage in generation charts: the PJM series carries no storage codes, so the PJM fuel-mix charts have no Storage bar. The U.S. series has storage values from mid-2024 and shows them as net generation, negative when storage charges. Storage in the generator-capacity charts and maps comes from EIA-860M (<code>MWH</code>), a different source, and is listed for both PJM and the U.S.</li>
+      ${codeNameList(meta)}
     </ul>
 
     <h2 class="sec">Limits to keep in mind</h2>

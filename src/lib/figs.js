@@ -15,8 +15,6 @@ Object.assign(Chart.defaults.plugins.tooltip, {
 
 export const GRID = '#e6eef0';
 export const INK = '#15323d';
-export const DC_COLOR = '#17404e';
-export const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 const BOLD = "600 12px 'Instrument Sans', sans-serif";
 
 export const f1 = (v) => Math.abs(v).toFixed(1);
@@ -106,18 +104,18 @@ export const pointTags = (tags) => ({
   },
 });
 
-// value text at the end of horizontal bars
+// value text at the end of horizontal bars (fmt(index, value, datasetIndex))
 export const barEndLabels = (fmt) => ({
   id: 'barEnd',
   afterDatasetsDraw(chart) {
     const { ctx } = chart;
     ctx.save(); ctx.font = BOLD; ctx.fillStyle = INK; ctx.textBaseline = 'middle';
-    chart.getDatasetMeta(0).data.forEach((bar, i) => {
-      const v = chart.data.datasets[0].data[i];
+    chart.data.datasets.forEach((ds, d) => chart.getDatasetMeta(d).data.forEach((bar, i) => {
+      const v = ds.data[i];
       if (v == null) return;
       ctx.textAlign = v >= 0 ? 'left' : 'right';
-      ctx.fillText(fmt(i, v), v >= 0 ? bar.x + 8 : bar.x - 8, bar.y);
-    });
+      ctx.fillText(fmt(i, v, d), v >= 0 ? bar.x + 8 : bar.x - 8, bar.y);
+    }));
     ctx.restore();
   },
 });
@@ -139,68 +137,94 @@ export const barTopLabels = (lines) => ({
 });
 
 // ---------------------------------------------------------------- electricity demand
-// ctx: { meta, demand, dm, scope, series, unitsNote }
-//   demand  = demand json; dm = meta block for that series; scope = 'PJM' or 'U.S. Lower 48'.
+// ctx: { meta, demand, dm, scope, series }
+//   demand  = demand json; dm = meta block for that series; scope = 'PJM' or 'U.S.'.
+const WORD = { 1: 'one', 2: 'two', 3: 'three', 4: 'four', 5: 'five', 6: 'six', 7: 'seven', 8: 'eight', 9: 'nine', 10: 'ten' };
+const Cap = (w) => w[0].toUpperCase() + w.slice(1);
+const perYear = (x, y, n) => 100 * (Math.pow(y / x, 1 / n) - 1);
+
 export function demandFigure(host, { meta, demand, dm, scope, series }) {
   const M = demand.monthly;
   const cmp = demand.comparison;
   const b = cmp.baseline, l = cmp.latest;
   const ye = cmp.years_earlier || {};
   const five = ye['5'];
+  const nOld = Math.max(0, ...Object.keys(ye).map(Number));      // oldest window available, up to 10 years back
+  const old = nOld >= 6 ? ye[String(nOld)] : null;
+  const span = (w) => `${ymLabel(w.from)} to ${ymLabel(w.to)}`;
   const thr = dm.min_coverage ?? 0.97;
   const okM = M.months.map((_, i) => M.coverage[i] >= thr);
   const days = (ym) => new Date(Number(ym.slice(0, 4)), Number(ym.slice(5, 7)), 0).getDate();
   const hrs = M.months.map((m) => days(m) * 24);
   const years = [...new Set(M.months.filter((_, i) => okM[i]).map((m) => Number(m.slice(0, 4))))];
-  const yearColor = (y) => (y <= 2022 ? TIME.coolRamp[Math.min(3, Math.max(0, y - 2019))] : TIME.warmRamp[Math.min(3, y - 2023)]);
 
-  // ---- before / after tiles
-  const tile = (key, rows, deltaText, down) => {
+  // ---- comparison tiles
+  const tile = (key, rows, deltaText, down, sub = '') => {
     const mx = Math.max(...rows.map((r) => r.v));
     return `<div class="cmp"><div class="cmp__k"><span>${key}</span><span class="cmp__d ${down ? 'down' : ''}">${deltaText}</span></div>${rows.map((r) =>
-      `<div class="cmp__row"><span>${r.label}</span><div class="track"><i class="${r.cls}" style="width:${(100 * r.v) / mx}%"></i></div><b>${r.fmt(r.v)}</b></div>`).join('')}</div>`;
+      `<div class="cmp__row"><span>${r.label}</span><div class="track"><i class="${r.cls}" style="width:${(100 * r.v) / mx}%"></i></div><b>${r.fmt(r.v)}</b></div>`).join('')}${sub ? `<div class="cmp__sub">${sub}</div>` : ''}</div>`;
   };
   const gwf = (v) => `${nf1.format(v / 1000)} GW`;
   const twf = (v) => `${nf0.format(v)} TWh`;
   const tiles = [];
-  const dEnergy = five ? dem(twhOf(five), twhOf(l)) : dem(twhOf(b), twhOf(l));
-  tiles.push(tile('Energy used in 12 months',
-    (five ? [{ label: '5 yrs', v: twhOf(five), cls: 'old', fmt: twf }] : []).concat([{ label: 'Before', v: twhOf(b), cls: 'before', fmt: twf }, { label: 'Latest', v: twhOf(l), cls: 'after', fmt: twf }]),
-    pct(dEnergy), dEnergy < 0));
-  for (const [k, x, y] of [['Average hour', b.avg_mw, l.avg_mw], ['Highest hour', b.peak_mw, l.peak_mw], ['Lowest hour', b.min_mw, l.min_mw]]) {
-    tiles.push(tile(k, [{ label: 'Before', v: x, cls: 'before', fmt: gwf }, { label: 'Latest', v: y, cls: 'after', fmt: gwf }], pct(dem(x, y)), y < x));
+  if (five) {
+    const d5 = dem(twhOf(five), twhOf(l));
+    tiles.push(tile('Last five years', [{ label: '5 yrs ago', v: twhOf(five), cls: 'old', fmt: twf }, { label: 'Latest', v: twhOf(l), cls: 'after', fmt: twf }], pct(d5), d5 < 0,
+      `${pct(perYear(twhOf(five), twhOf(l), 5))} a year, compounded. Energy used in 12 months: ${esc(span(five))} against ${esc(span(l))}.`));
+  }
+  if (old && five) {
+    const k = nOld - 5;
+    const dO = dem(twhOf(old), twhOf(five));
+    tiles.push(tile(`${Cap(WORD[k] || String(k))} years before that`,
+      [{ label: `${nOld} yrs ago`, v: twhOf(old), cls: 'before', fmt: twf }, { label: '5 yrs ago', v: twhOf(five), cls: 'old', fmt: twf }], pct(dO), dO < 0,
+      `${pct(perYear(twhOf(old), twhOf(five), k))} a year, compounded. ${esc(span(old))} against ${esc(span(five))}.`));
+  }
+  const dB = dem(twhOf(b), twhOf(l));
+  tiles.push(tile('Since ChatGPT', [{ label: 'Before', v: twhOf(b), cls: 'before', fmt: twf }, { label: 'Latest', v: twhOf(l), cls: 'after', fmt: twf }], pct(dB), dB < 0, `Energy used: ${esc(span(b))} against ${esc(span(l))}.`));
+  for (const [k, x, y] of [['Average hour', b.avg_mw, l.avg_mw], ['Highest hour', b.peak_mw, l.peak_mw]]) {
+    tiles.push(tile(`${k}, since ChatGPT`, [{ label: 'Before', v: x, cls: 'before', fmt: gwf }, { label: 'Latest', v: y, cls: 'after', fmt: gwf }], pct(dem(x, y)), y < x));
   }
   const lead = `<div class="cmps">${tiles.join('')}</div>`;
 
-  const chat = dem(b.avg_mw, l.avg_mw);
-  const callout = `<b>Compared with the 12 months before ChatGPT's release</b> (${esc(ymLabel(b.from))} to ${esc(ymLabel(b.to))}), average hourly demand is <b>${pct(chat)}</b> (${nf1.format(b.avg_mw / 1000)} GW to ${nf1.format(l.avg_mw / 1000)} GW).`
-    + (five ? ` <b>Compared with the same 12 months five years earlier</b> (${esc(ymLabel(five.from))} to ${esc(ymLabel(five.to))}), it is <b>${pct(dem(five.avg_mw, l.avg_mw))}</b> (${nf0.format(twhOf(five))} TWh to ${nf0.format(twhOf(l))} TWh used).` : '')
-    + (five ? ' The five-years-earlier window starts in late 2020, soon after the 2020 pandemic dip in demand, so some of the growth measured from it may be recovery.' : '');
+  // ---- callout: the ten years, split into the two halves, then the ChatGPT comparison
+  const parts = [];
+  if (old && five) {
+    parts.push(`<b>${Cap(WORD[nOld] || String(nOld))}-year view.</b> Energy used in 12 months went from ${nf0.format(twhOf(old))} TWh (${esc(span(old))}) to ${nf0.format(twhOf(l))} TWh (${esc(span(l))}), <b>${pct(dem(twhOf(old), twhOf(l)))}</b> in ${nOld} years, or ${pct(perYear(twhOf(old), twhOf(l), nOld))} a year.`
+      + ` The first ${WORD[nOld - 5]} of those ${nOld} years went ${pct(dem(twhOf(old), twhOf(five)))} (${pct(perYear(twhOf(old), twhOf(five), nOld - 5))} a year) and the last five went <b>${pct(dem(twhOf(five), twhOf(l)))}</b> (${pct(perYear(twhOf(five), twhOf(l), 5))} a year).`);
+  } else if (five) {
+    parts.push(`<b>Last five years.</b> Energy used in 12 months went from ${nf0.format(twhOf(five))} TWh (${esc(span(five))}) to ${nf0.format(twhOf(l))} TWh (${esc(span(l))}), <b>${pct(dem(twhOf(five), twhOf(l)))}</b>, or ${pct(perYear(twhOf(five), twhOf(l), 5))} a year.`);
+  }
+  parts.push(`<b>Since ChatGPT's release.</b> Average hourly demand in the latest 12 months is <b>${pct(dem(b.avg_mw, l.avg_mw))}</b> against the 12 months before the release (${esc(span(b))}): ${nf1.format(b.avg_mw / 1000)} GW to ${nf1.format(l.avg_mw / 1000)} GW.`);
+  if (five && five.from >= '2020-07') parts.push('Spring 2020 had a pandemic dip in demand; the five-years-earlier window starts after it, so it is the base for the last-five-years change.');
+  const callout = parts.join('<br>');
 
-  const foot = `Source: EIA Open Data API, route <code>electricity/rto/region-data</code> (EIA-930, type D, ${esc(series)}). Hours with a non-positive value were dropped (${nf0.format(dm.non_positive_rows_dropped)} of ${nf0.format(dm.hourly_rows)}), and so were ${nf0.format(dm.outlier_hours_dropped_pjm ?? 0)} hours that are more than 1.5 times or under half the median of the surrounding 7 days (EIA-930 contains impossible values; see Sources and method). Months with under ${Math.round(thr * 100)}% of expected hours are left out${dm.partial_months.length ? ` (${esc(dm.partial_months.join(', '))})` : ''}. Months are grouped in Eastern time. Energy used is the sum of hourly demand.`;
+  const dailyNote = demand.daily ? ` Daily values use days with at least ${dm.daily_min_hours ?? 20} hours of data.` : '';
+  const foot = `Source: EIA Open Data API, route <code>electricity/rto/region-data</code> (EIA-930, type D, ${esc(series)}). EIA-930 demand data begin in July 2015. Hours with a non-positive value were dropped (${nf0.format(dm.non_positive_rows_dropped)} of ${nf0.format(dm.hourly_rows)}), and so were ${nf0.format(dm.outlier_hours_dropped_pjm ?? 0)} hours that are more than 1.5 times or under half the median of the surrounding 7 days (EIA-930 contains impossible values; see Sources and method). Months with under ${Math.round(thr * 100)}% of expected hours are left out${dm.partial_months.length ? ` (${esc(dm.partial_months.join(', '))})` : ''}. Months and days are in Eastern time. Energy used is the sum of hourly demand.${dailyNote}`;
 
   const views = [];
+  const isAfter = (m) => m >= '2022-11';
+  const release = M.months.indexOf('2022-11');
 
-  // ---- yearly totals (12-month windows, newest last)
+  // ---- yearly totals: every 12-month window back to the oldest the data allow, newest last
   const wins = [];
-  for (let k = 5; k >= 1; k--) if (ye[String(k)]) wins.push(ye[String(k)]);
+  for (let k = nOld; k >= 1; k--) if (ye[String(k)]) wins.push(ye[String(k)]);
   wins.push(l);
   if (wins.length >= 3) {
-    const lab = (w) => `${ymLabel(w.from).replace(' ', ' ')} – ${ymLabel(w.to)}`;
+    const lab = (w) => `${ymLabel(w.from)} – ${ymLabel(w.to)}`;
     const warm = (w) => w.to > '2022-10';
     views.push({
-      id: 'annual', label: 'Yearly totals', height: 380,
-      note: `Total electricity demand in each 12-month window ending ${ymLabel(l.to).split(' ')[0]}, in TWh. The bars start at zero, so a few percent looks small; the labels give the change from the window before.${wins.some((w) => w.hours > 8770) ? ' A window that includes February 29 has one extra day (about 0.3% more hours).' : ''}`,
+      id: 'annual', label: 'Yearly totals', height: 400,
+      note: `Total electricity demand in each 12-month window ending ${ymLabel(l.to).split(' ')[0]}, in TWh, back to the oldest window the data cover. The bars start at zero, so a few percent looks small; the labels give the change from the window before.${wins.some((w) => w.hours > 8770) ? ' A window that includes February 29 has one extra day (about 0.3% more hours).' : ''}`,
       legend: `<span><i style="background:${TIME.cool}"></i>Windows ending before ChatGPT's release</span><span><i style="background:${TIME.warm}"></i>Windows ending after</span>`,
       draw: (cv) => new Chart(cv, {
         type: 'bar',
-        data: { labels: wins.map((w) => [ymLabel(w.from), `to ${ymLabel(w.to)}`]), datasets: [{ data: wins.map(twhOf), backgroundColor: wins.map((w) => (warm(w) ? TIME.warm : TIME.cool)), borderRadius: 6, maxBarThickness: 90 }] },
+        data: { labels: wins.map((w) => [ymLabel(w.from), `to ${ymLabel(w.to)}`]), datasets: [{ data: wins.map(twhOf), backgroundColor: wins.map((w) => (warm(w) ? TIME.warm : TIME.cool)), borderRadius: 6, maxBarThickness: 70 }] },
         options: {
           maintainAspectRatio: false, layout: { padding: { top: 38 } },
           plugins: { legend: { display: false }, tooltip: { callbacks: { title: (it) => lab(wins[it[0].dataIndex]), label: (c) => { const i = c.dataIndex; return [`${nf1.format(c.parsed.y)} TWh`, i ? `${pct(dem(twhOf(wins[i - 1]), twhOf(wins[i])))} vs the window before` : '']; } } } },
-          scales: { x: { grid: { display: false } }, y: { min: 0, grid: { color: GRID }, title: { display: true, text: 'TWh in 12 months' }, ticks: { callback: (v) => nf0.format(v) } } },
+          scales: { x: { grid: { display: false }, ticks: { autoSkip: false, maxRotation: 0, font: { size: 11 } } }, y: { min: 0, grid: { color: GRID }, title: { display: true, text: 'TWh in 12 months' }, ticks: { callback: (v) => nf0.format(v) } } },
         },
-        plugins: [barTopLabels((i) => [`${nf0.format(twhOf(wins[i]))} TWh`, ...(i ? [pct(dem(twhOf(wins[i - 1]), twhOf(wins[i])))] : [])])],
+        plugins: [barTopLabels((i) => [`${nf0.format(twhOf(wins[i]))}`, ...(i ? [pct(dem(twhOf(wins[i - 1]), twhOf(wins[i])))] : [])])],
       }),
     });
   }
@@ -236,45 +260,54 @@ export function demandFigure(host, { meta, demand, dm, scope, series }) {
     }),
   });
 
-  // ---- each year by month
-  const byYear = years.map((y) => {
-    const arr = Array(12).fill(null);
-    M.months.forEach((m, i) => { if (okM[i] && Number(m.slice(0, 4)) === y) arr[Number(m.slice(5, 7)) - 1] = M.avg_mw[i]; });
-    return { y, arr };
-  });
-  const latestY = years[years.length - 1];
+  // ---- every month, in one continuous line
+  const mAvg = M.months.map((_, i) => (okM[i] ? M.avg_mw[i] : null));
+  const mPk = M.months.map((_, i) => (okM[i] ? M.peak_mw[i] : null));
   views.push({
-    id: 'years', label: 'Each year by month',
-    note: 'Average hourly demand in each calendar month, one line per year. Cool lines are 2019 to 2022 and warm lines are 2023 on, darker for later years, so a line sitting above the one before it means more demand in that month.',
-    legend: byYear.map(({ y }) => `<span><i class="line" style="background:${yearColor(y)}"></i>${y}</span>`).join(''),
+    id: 'months', label: 'Every month',
+    note: `Every month in the data, in order, from ${ymLabel(M.months.find((_, i) => okM[i]))} to ${ymLabel(M.months[M.months.length - 1 - [...okM].reverse().findIndex(Boolean)])}: the average hour (orange after ChatGPT's release, blue before) and the highest hour of the month. The rise and fall each year is the seasons. The axis does not start at zero.`,
+    legend: `<span><i class="line" style="background:${TIME.cool}"></i>Average hour, before the release</span><span><i class="line" style="background:${TIME.warm}"></i>Average hour, after</span><span><i class="line" style="background:#8798a1"></i>Highest hour of the month</span>`,
     draw: (cv) => new Chart(cv, {
       type: 'line',
-      data: { labels: MONTHS, datasets: byYear.map(({ y, arr }) => ({ label: String(y), data: arr, borderColor: yearColor(y), backgroundColor: yearColor(y), borderWidth: y === latestY ? 3.5 : 2, pointRadius: 0, pointHoverRadius: 4, tension: 0.25, spanGaps: false })) },
+      data: { labels: M.months, datasets: [
+        { label: 'Average hour', data: mAvg, borderColor: TIME.cool, borderWidth: 2.5, pointRadius: 0, pointHoverRadius: 4, tension: 0.15, segment: { borderColor: (c) => (c.p1.parsed.x >= release ? TIME.warm : TIME.cool) } },
+        { label: 'Highest hour', data: mPk, borderColor: '#8798a1', borderWidth: 1.5, pointRadius: 0, pointHoverRadius: 4, tension: 0.15 },
+      ] },
       options: {
         maintainAspectRatio: false, interaction: { mode: 'index', intersect: false },
-        plugins: { legend: { display: false }, tooltip: { itemSort: (a, c) => c.parsed.y - a.parsed.y, callbacks: { label: (c) => `${c.dataset.label}: ${nf0.format(c.parsed.y)} MW` } } },
-        scales: { x: { grid: { display: false } }, y: { title: { display: true, text: 'Average hourly demand (MW)' }, grid: { color: GRID }, ticks: { callback: (v) => nf0.format(v) } } },
+        plugins: { legend: { display: false }, tooltip: { callbacks: { title: (it) => ymLabel(it[0].label), label: (c) => `${c.dataset.label}: ${nf0.format(c.parsed.y)} MW` } } },
+        scales: { x: { grid: { display: false }, ticks: yearTicks(M.months) }, y: { title: { display: true, text: 'Demand (MW)' }, grid: { color: GRID }, ticks: { callback: (v) => nf0.format(v) }, grace: '8%' } },
       },
+      plugins: [releaseMarker(M.months, '2022-11', 'bottom')],
     }),
   });
 
-  // ---- versus a year earlier
-  const yl = M.months.slice(12);
-  const yv = yl.map((_, j) => { const i = j + 12; return okM[i] && okM[i - 12] ? dem(M.avg_mw[i - 12], M.avg_mw[i]) : null; });
-  views.push({
-    id: 'yoy', label: 'Versus a year earlier',
-    note: 'Average hourly demand in each month compared with the same month one year before. Cool bars are months up to ChatGPT\'s release, warm bars are after. Weather moves single months, so look at the run of bars rather than any one.',
-    legend: `<span><i style="background:${TIME.cool}"></i>Up to Nov 2022</span><span><i style="background:${TIME.warm}"></i>Dec 2022 on</span>`,
-    draw: (cv) => new Chart(cv, {
-      type: 'bar',
-      data: { labels: yl, datasets: [{ data: yv, backgroundColor: yl.map((m) => (m < '2022-12' ? TIME.cool : TIME.warm)), borderRadius: 2, maxBarThickness: 12 }] },
-      options: {
-        maintainAspectRatio: false,
-        plugins: { legend: { display: false }, tooltip: { callbacks: { title: (it) => `${ymLabel(it[0].label)} vs ${ymLabel(`${Number(it[0].label.slice(0, 4)) - 1}${it[0].label.slice(4)}`)}`, label: (c) => `Change: ${pct(c.parsed.y)}` } } },
-        scales: { x: { grid: { display: false }, ticks: yearTicks(yl) }, y: { title: { display: true, text: 'Change vs same month a year earlier (%)' }, grid: { color: GRID }, ticks: { callback: (v) => `${v}%` } } },
-      },
-    }),
-  });
+  // ---- every day
+  const D = demand.daily;
+  if (D && D.avg_mw?.length > 60) {
+    const t0 = Date.UTC(Number(D.start.slice(0, 4)), Number(D.start.slice(5, 7)) - 1, Number(D.start.slice(8, 10)));
+    const dl = D.avg_mw.map((_, i) => new Date(t0 + i * 86400000).toISOString().slice(0, 10));
+    const drel = dl.indexOf('2022-11-30');
+    views.push({
+      id: 'daily', label: 'Every day',
+      note: `The average hour of every day in the data, ${esc(D.start)} to ${esc(dl[dl.length - 1])}, with the highest hour of each day in grey.${dailyNote} The yearly rise and fall is the seasons, and short spikes are heat or cold. The axis does not start at zero.`,
+      legend: `<span><i class="line" style="background:${TIME.cool}"></i>Daily average hour, before the release</span><span><i class="line" style="background:${TIME.warm}"></i>Daily average hour, after</span><span><i class="line" style="background:#c3ccd1"></i>Highest hour of the day</span>`,
+      height: 400,
+      draw: (cv) => new Chart(cv, {
+        type: 'line',
+        data: { labels: dl, datasets: [
+          { label: 'Highest hour', data: D.peak_mw, borderColor: '#c3ccd1', borderWidth: 1, pointRadius: 0, pointHoverRadius: 3, tension: 0 },
+          { label: 'Average hour', data: D.avg_mw, borderColor: TIME.cool, borderWidth: 1.4, pointRadius: 0, pointHoverRadius: 3, tension: 0, segment: { borderColor: (c) => (c.p1.parsed.x >= drel ? TIME.warm : TIME.cool) } },
+        ] },
+        options: {
+          maintainAspectRatio: false, interaction: { mode: 'index', intersect: false },
+          plugins: { legend: { display: false }, tooltip: { itemSort: (a, c) => c.datasetIndex - a.datasetIndex, callbacks: { title: (it) => it[0].label, label: (c) => `${c.dataset.label}: ${nf0.format(c.parsed.y)} MW` } } },
+          scales: { x: { grid: { display: false }, ticks: { autoSkip: false, maxRotation: 0, callback(v) { const s = dl[v]; return s && s.endsWith('-01-01') ? s.slice(0, 4) : ''; } } }, y: { title: { display: true, text: 'Demand (MW)' }, grid: { color: GRID }, ticks: { callback: (v) => nf0.format(v) }, grace: '6%' } },
+        },
+        plugins: [releaseMarker(dl, '2022-11-30', 'bottom')],
+      }),
+    });
+  }
 
   // ---- highest hour per calendar year
   const pk = years.map((y) => ({ y, v: Math.max(...M.months.map((m, i) => (okM[i] && Number(m.slice(0, 4)) === y ? M.peak_mw[i] : 0))), n: M.months.filter((m, i) => okM[i] && Number(m.slice(0, 4)) === y).length }));
@@ -288,7 +321,7 @@ export function demandFigure(host, { meta, demand, dm, scope, series }) {
       options: {
         maintainAspectRatio: false, layout: { padding: { top: 22 } },
         plugins: { legend: { display: false }, tooltip: { callbacks: { label: (c) => `Highest hour: ${nf0.format(c.parsed.y)} MW` } } },
-        scales: { x: { grid: { display: false } }, y: { min: 0, title: { display: true, text: 'MW' }, grid: { color: GRID }, ticks: { callback: (v) => nf0.format(v) } } },
+        scales: { x: { grid: { display: false }, ticks: { autoSkip: false, maxRotation: 0, font: { size: 11 } } }, y: { min: 0, title: { display: true, text: 'MW' }, grid: { color: GRID }, ticks: { callback: (v) => nf0.format(v) } } },
       },
       plugins: [barTopLabels((i) => nf0.format(pk[i].v))],
     }),
@@ -297,44 +330,49 @@ export function demandFigure(host, { meta, demand, dm, scope, series }) {
   const rows = M.months.map((m, i) => (okM[i] ? [m, nf0.format(M.avg_mw[i]), nf0.format(M.peak_mw[i]), nf0.format(M.min_mw[i]), nf1.format(M.twh[i])] : null)).filter(Boolean);
   views.push({ id: 'table', label: 'Table', table: table(['Month', 'Average hour (MW)', 'Highest hour (MW)', 'Lowest hour (MW)', 'Energy (TWh)'], rows) });
 
-  const tw = (w) => (w ? twhOf(w) : null);
-  const title = five
-    ? `${scope} electricity demand ${dem(tw(five), tw(l)) >= 0 ? 'grew' : 'fell'} ${f1(dem(tw(five), tw(l)))}% over five years`
-    : `${scope} electricity demand is ${f1(chat)}% ${chat >= 0 ? 'higher' : 'lower'} than in the year before ChatGPT's release`;
+  const tw = (w) => twhOf(w);
+  const dir = (x) => (x >= 0 ? 'grew' : 'fell');
+  const title = old && five
+    ? `${scope} electricity demand ${dir(dem(tw(old), tw(l)))} ${f1(dem(tw(old), tw(l)))}% over ${WORD[nOld] || nOld} years: ${sgn(dem(tw(old), tw(five)))}% in the first ${WORD[nOld - 5]} and ${sgn(dem(tw(five), tw(l)))}% in the last five`
+    : five
+      ? `${scope} electricity demand ${dir(dem(tw(five), tw(l)))} ${f1(dem(tw(five), tw(l)))}% over five years`
+      : `${scope} electricity demand is ${f1(dem(b.avg_mw, l.avg_mw))}% ${dem(b.avg_mw, l.avg_mw) >= 0 ? 'higher' : 'lower'} than in the year before ChatGPT's release`;
   return figure(host, { title, callout, lead, views, foot });
 }
 
-// ---------------------------------------------------------------- fuel mix and natural gas
-// ctx: { meta, fuel, fm, gl, scope, winUnits, shareNote }
-export function fuelFigure(host, { meta, fuel, fm, scope, winUnits }) {
+// ---------------------------------------------------------------- generation by fuel
+// ctx: { meta, fuel, fm, scope }
+export function fuelFigure(host, { meta, fuel, fm, scope }) {
   const groups = meta.groups;
   const gl = Object.fromEntries(groups.map((g) => [g.key, g.label]));
   const fb = fuel.comparison.baseline, fl = fuel.comparison.latest;
-  const tot = (o) => sum(Object.entries(o.gwh).filter(([k]) => k !== 'storage').map(([, v]) => v));
-  const share = (o, k) => (100 * o.gwh[k]) / tot(o);
   const fMin = fm.min_coverage ?? 0.97;
-  const dTot = (tot(fl) - tot(fb)) / 1000;
   const okF = fuel.months.map((_, i) => fuel.coverage[i] >= fMin);
-  const keys = groups.map((g) => g.key).filter((k) => k !== 'storage');
-  const delta = keys.map((k) => ({ k, d: (fl.gwh[k] - fb.gwh[k]) / 1000, p: dem(fb.gwh[k], fl.gwh[k]) }));
+  // A fuel is listed when the series carries any value for it. PJM's EIA-930 series has no storage codes, so Storage is absent for PJM.
+  const keys = groups.map((g) => g.key).filter((k) => (fuel.gwh[k] || []).some((v) => v));
+  const hasStorage = keys.includes('storage');
+  const skeys = keys.filter((k) => k !== 'storage');          // storage can be negative, so it is left out of share-of-total views
+  const tot = (o) => sum(keys.map((k) => o.gwh[k] || 0));
+  const stot = (o) => sum(skeys.map((k) => o.gwh[k] || 0));
+  const share = (o, k) => (100 * o.gwh[k]) / stot(o);
+  const dTot = (tot(fl) - tot(fb)) / 1000;
+  const delta = keys.map((k) => ({ k, d: (fl.gwh[k] - fb.gwh[k]) / 1000, p: fb.gwh[k] ? dem(fb.gwh[k], fl.gwh[k]) : null }));
   const byDelta = delta.slice().sort((a, c) => c.d - a.d);
-  const gas = delta.find((x) => x.k === 'gas');
-  const coal = delta.find((x) => x.k === 'coal');
-  const grossUp = sum(delta.filter((x) => x.d > 0).map((x) => x.d));
-  const topUp = byDelta[0];
-  const gasUnits = winUnits.filter((u) => u.group === 'gas');
-  const title = topUp.k === 'gas'
-    ? `Natural gas supplied the largest increase in ${scope} generation: ${sgn(gas.d)} TWh`
-    : `${gl[topUp.k]} grew most in ${scope} generation (${sgn(topUp.d)} TWh); natural gas changed ${sgn(gas.d)} TWh`;
-  const callout = `<b>Natural gas:</b> ${nf1.format(fl.gwh.gas / 1000)} TWh in the latest 12 months against ${nf1.format(fb.gwh.gas / 1000)} TWh before, ${sgn(gas.d)} TWh (${pct(gas.p)}).`
-    + (gas.d > 0 && grossUp > 0 ? ` That is ${nf0.format((100 * gas.d) / grossUp)}% of the combined increase across the fuels that grew (${nf1.format(grossUp)} TWh).` : '')
-    + (coal && coal.d < 0 ? ` Coal fell ${f1(coal.d)} TWh.` : '')
-    + ` Gas supplied ${nf1.format(share(fl, 'gas'))}% of generation, ${pp(share(fl, 'gas') - share(fb, 'gas'))} on the year before. EIA lists ${nf0.format(gasUnits.length)} gas units (${nf0.format(sum(gasUnits.map((u) => u.mw)))} MW nameplate) reaching operation since Dec 2022; the generation figures cover every gas unit, new and existing.`;
+  const pc = (p) => (p == null ? 'n/a' : pct(p));
+  const title = `${scope} net generation was ${nf1.format(tot(fl) / 1000)} TWh in the latest 12 months, ${pct(dem(tot(fb), tot(fl)))} on the 12 months before ChatGPT's release`;
+
+  let callout = '';
+  if (hasStorage) {
+    const si = fuel.gwh.storage.findIndex((v) => v);
+    callout = `<b>Storage.</b> Storage is battery and pumped-storage net generation as balancing authorities report it, and it is negative in hours when storage is charging. This series has storage values from ${esc(ymLabel(fuel.months[si]))} on; before that it has none, so a change in the Storage bar can reflect when reporting began.`;
+  } else {
+    callout = `<b>Storage.</b> PJM's EIA-930 series carries no storage fuel codes, so there is no Storage bar here. The generator-capacity chart below does list storage, because it comes from EIA's generator inventory (EIA-860M) and not from EIA-930.`;
+  }
 
   const rows1 = byDelta.concat([{ k: 'all', d: dTot, p: dem(tot(fb), tot(fl)) }]);
   const legendKeys = keys.map((k) => `<span><i style="background:${FUEL_COLOR[k]}"></i>${esc(gl[k])}</span>`).join('');
   const v1 = {
-    id: 'change', label: 'What changed', height: 360,
+    id: 'change', label: 'What changed', height: 60 + rows1.length * 40,
     note: `Change in net generation by fuel, latest 12 months against the 12 months before ChatGPT's release, in TWh. The last bar is all fuels together.`,
     legend: legendKeys + `<span><i style="background:${INK}"></i>All fuels shown</span>`,
     draw: (cv) => new Chart(cv, {
@@ -342,16 +380,16 @@ export function fuelFigure(host, { meta, fuel, fm, scope, winUnits }) {
       data: { labels: rows1.map((r) => (r.k === 'all' ? 'All fuels' : gl[r.k])), datasets: [{ data: rows1.map((r) => r.d), backgroundColor: rows1.map((r) => (r.k === 'all' ? INK : FUEL_COLOR[r.k])), borderRadius: 5, barThickness: 24 }] },
       options: {
         indexAxis: 'y', maintainAspectRatio: false, layout: { padding: { right: 24 } },
-        plugins: { legend: { display: false }, tooltip: { callbacks: { label: (c) => { const r = rows1[c.dataIndex]; return `${sgn(r.d)} TWh (${pct(r.p)})`; } } } },
+        plugins: { legend: { display: false }, tooltip: { callbacks: { label: (c) => { const r = rows1[c.dataIndex]; return `${sgn(r.d)} TWh (${pc(r.p)})`; } } } },
         scales: { x: { grace: '22%', grid: { color: GRID }, title: { display: true, text: 'Change in generation (TWh)' } }, y: { grid: { display: false } } },
       },
-      plugins: [barEndLabels((i, v) => `${sgn(v)} TWh  (${pct(rows1[i].p)})`)],
+      plugins: [barEndLabels((i, v) => `${sgn(v)} TWh  (${pc(rows1[i].p)})`)],
     }),
   };
 
   const v2 = {
     id: 'sidebyside', label: 'Two years side by side', height: 230,
-    note: 'Net generation by fuel in each 12-month window, in TWh. Gas is the first segment of each bar.',
+    note: 'Net generation by fuel in each 12-month window, in TWh.',
     legend: legendKeys,
     draw: (cv) => new Chart(cv, {
       type: 'bar',
@@ -362,16 +400,12 @@ export function fuelFigure(host, { meta, fuel, fm, scope, winUnits }) {
         scales: { x: { stacked: true, grid: { color: GRID }, title: { display: true, text: 'TWh' } }, y: { stacked: true, grid: { display: false } } },
       },
       plugins: [{
-        id: 'seglabels',
+        id: 'totlabels',
         afterDatasetsDraw(chart) {
           const { ctx, scales } = chart;
           ctx.save(); ctx.font = BOLD; ctx.textBaseline = 'middle';
-          const gasMeta = chart.getDatasetMeta(0);
-          gasMeta.data.forEach((bar, i) => {
-            const v = chart.data.datasets[0].data[i];
-            if (bar.width > 48) { ctx.fillStyle = INK; ctx.textAlign = 'center'; ctx.fillText(nf1.format(v), bar.base + bar.width / 2, bar.y); }
-          });
-          [fb, fl].forEach((o, i) => { const x = scales.x.getPixelForValue(tot(o) / 1000) + 8; ctx.fillStyle = INK; ctx.textAlign = 'left'; ctx.fillText(`${(tot(o) / 1000).toFixed(1)} TWh`, x, gasMeta.data[i].y); });
+          const m0 = chart.getDatasetMeta(0);
+          [fb, fl].forEach((o, i) => { ctx.fillStyle = INK; ctx.textAlign = 'left'; ctx.fillText(`${(tot(o) / 1000).toFixed(1)} TWh`, scales.x.getPixelForValue(tot(o) / 1000) + 8, m0.data[i].y); });
           ctx.restore();
         },
       }],
@@ -387,15 +421,15 @@ export function fuelFigure(host, { meta, fuel, fm, scope, winUnits }) {
   const fl2 = fuel.months.slice(f0);
   const v3 = {
     id: 'rolling', label: 'Rolling 12 months',
-    note: 'Each point is the total generation of the 12 months ending in that month, so seasons cancel out. Natural gas is drawn thicker.',
+    note: 'Each point is the total generation of the 12 months ending in that month, so seasons cancel out.',
     legend: keys.map((k) => `<span><i class="line" style="background:${FUEL_COLOR[k]}"></i>${esc(gl[k])}</span>`).join(''),
     draw: (cv) => new Chart(cv, {
       type: 'line',
-      data: { labels: fl2, datasets: keys.map((k) => ({ label: gl[k], data: rollF.slice(f0).map((r) => (r ? r[k] : null)), borderColor: FUEL_COLOR[k], backgroundColor: FUEL_COLOR[k], borderWidth: k === 'gas' ? 4 : 2, pointRadius: 0, pointHoverRadius: 4, tension: 0.2 })) },
+      data: { labels: fl2, datasets: keys.map((k) => ({ label: gl[k], data: rollF.slice(f0).map((r) => (r ? r[k] : null)), borderColor: FUEL_COLOR[k], backgroundColor: FUEL_COLOR[k], borderWidth: 2.5, pointRadius: 0, pointHoverRadius: 4, tension: 0.2 })) },
       options: {
         maintainAspectRatio: false, interaction: { mode: 'index', intersect: false },
         plugins: { legend: { display: false }, tooltip: { itemSort: (a, c) => c.parsed.y - a.parsed.y, callbacks: { title: (it) => `12 months to ${ymLabel(it[0].label)}`, label: (c) => `${c.dataset.label}: ${nf1.format(c.parsed.y)} TWh` } } },
-        scales: { x: { grid: { display: false }, ticks: yearTicks(fl2) }, y: { min: 0, grid: { color: GRID }, title: { display: true, text: 'TWh in the 12 months' } } },
+        scales: { x: { grid: { display: false }, ticks: yearTicks(fl2) }, y: { beginAtZero: true, grid: { color: GRID }, title: { display: true, text: 'TWh in the 12 months' } } },
       },
       plugins: [releaseMarker(fl2, '2022-11', 'top')],
     }),
@@ -404,14 +438,14 @@ export function fuelFigure(host, { meta, fuel, fm, scope, winUnits }) {
   const fi = fuel.months.map((_, i) => i).filter((i) => okF[i]);
   const flab = fi.map((i) => fuel.months[i]);
   const gwhOf = (k) => fi.map((i) => fuel.gwh[k][i]);
-  const totals = fi.map((_, j) => sum(keys.map((k) => gwhOf(k)[j])));
+  const totals = fi.map((_, j) => sum(skeys.map((k) => gwhOf(k)[j])));
   const v4 = {
     id: 'share', label: 'Share over time',
-    note: 'Each fuel\'s share of monthly net generation. Storage is left out of the stack because it can be negative when charging.',
-    legend: legendKeys,
+    note: `Each fuel's share of monthly net generation${hasStorage ? ', without storage, which can be negative when charging' : ''}.`,
+    legend: skeys.map((k) => `<span><i style="background:${FUEL_COLOR[k]}"></i>${esc(gl[k])}</span>`).join(''),
     draw: (cv) => new Chart(cv, {
       type: 'line',
-      data: { labels: flab, datasets: keys.map((k) => ({ label: gl[k], data: gwhOf(k).map((v, j) => (100 * v) / totals[j]), backgroundColor: FUEL_COLOR[k], borderColor: '#ffffff', borderWidth: 0.8, fill: true, pointRadius: 0, pointHoverRadius: 3, tension: 0, stack: 'mix' })) },
+      data: { labels: flab, datasets: skeys.map((k) => ({ label: gl[k], data: gwhOf(k).map((v, j) => (100 * v) / totals[j]), backgroundColor: FUEL_COLOR[k], borderColor: '#ffffff', borderWidth: 0.8, fill: true, pointRadius: 0, pointHoverRadius: 3, tension: 0, stack: 'mix' })) },
       options: {
         maintainAspectRatio: false, interaction: { mode: 'index', intersect: false },
         plugins: { legend: { display: false }, tooltip: { itemSort: (a, c) => c.datasetIndex - a.datasetIndex, callbacks: { title: (it) => ymLabel(it[0].label), label: (c) => `${c.dataset.label}: ${nf1.format(c.parsed.y)}%` } } },
@@ -421,16 +455,18 @@ export function fuelFigure(host, { meta, fuel, fm, scope, winUnits }) {
     }),
   };
 
+  const sh = hasStorage ? ' (without storage)' : '';
   const v5 = {
     id: 'table', label: 'Table',
-    table: table(['Fuel', `TWh ${ymLabel(fb.from)}–${ymLabel(fb.to)}`, `TWh ${ymLabel(fl.from)}–${ymLabel(fl.to)}`, 'Change (TWh)', 'Change (%)', 'Share before', 'Share latest'],
-      keys.map((k) => [gl[k], nf1.format(fb.gwh[k] / 1000), nf1.format(fl.gwh[k] / 1000), sgn((fl.gwh[k] - fb.gwh[k]) / 1000), pct(dem(fb.gwh[k], fl.gwh[k])), `${nf1.format(share(fb, k))}%`, `${nf1.format(share(fl, k))}%`])
-        .concat([['All fuels shown', nf1.format(tot(fb) / 1000), nf1.format(tot(fl) / 1000), sgn(dTot), pct(dem(tot(fb), tot(fl))), '100%', '100%']])),
+    table: table(['Fuel', `TWh ${ymLabel(fb.from)}–${ymLabel(fb.to)}`, `TWh ${ymLabel(fl.from)}–${ymLabel(fl.to)}`, 'Change (TWh)', 'Change (%)', `Share before${sh}`, `Share latest${sh}`],
+      keys.map((k) => [gl[k], nf1.format(fb.gwh[k] / 1000), nf1.format(fl.gwh[k] / 1000), sgn((fl.gwh[k] - fb.gwh[k]) / 1000), fb.gwh[k] ? pct(dem(fb.gwh[k], fl.gwh[k])) : 'n/a', k === 'storage' ? 'n/a' : `${nf1.format(share(fb, k))}%`, k === 'storage' ? 'n/a' : `${nf1.format(share(fl, k))}%`])
+        .concat([['All fuels shown', nf1.format(tot(fb) / 1000), nf1.format(tot(fl) / 1000), sgn(dTot), pct(dem(tot(fb), tot(fl))), '', '']])),
   };
 
+  const names = fuel.code_names && Object.keys(fuel.code_names).length ? fuel.codes_seen.map((c) => `${c}${fuel.code_names[c] ? ` (${fuel.code_names[c]})` : ''}`).join(', ') : fuel.codes_seen.join(', ');
   return figure(host, {
     title, callout, views: [v1, v2, v3, v4, v5],
-    foot: `Source: EIA Open Data API, route <code>electricity/rto/fuel-type-data</code> (EIA-930, ${esc(scope === 'PJM' ? 'respondent PJM' : 'respondent US48')}). EIA-930 generation is not the same series as EIA-923 plant generation, so the two should not be mixed. EIA fuel codes: ${esc(fuel.codes_seen.join(', '))}; grouped as listed on the Sources page. Gas capacity is from <code>electricity/operating-generator-capacity</code> (EIA-860M).`,
+    foot: `Source: EIA Open Data API, route <code>electricity/rto/fuel-type-data</code> (EIA-930, ${esc(scope === 'PJM' ? 'respondent PJM' : 'respondent US48')}). EIA-930 generation is not the same series as EIA-923 plant generation, so the two should not be mixed. EIA fuel codes in this series: ${esc(names)}; grouped as listed on the Sources page.`,
   });
 }
 
@@ -480,12 +516,11 @@ export function additionsFigure(host, { meta, units, winUnits, removed, snapshot
 
   const net = added - gone;
   const rows = groups.map((g) => ({ k: g.key, a: addMw[g.key], r: retMw[g.key], n: addMw[g.key] - retMw[g.key] })).sort((x, y) => y.n - x.n);
-  const gasRow = rows.find((r) => r.k === 'gas');
   const xc = meta.retired?.crosscheck?.[scopeLabel] || null;
   const title = `${scopeLabel === 'pjm' ? 'PJM' : 'U.S.'} generators added ${nf0.format(added)} MW and retired ${nf0.format(gone)} MW since December 2022, a net ${net >= 0 ? '+' : '−'}${nf0.format(Math.abs(net))} MW`;
   const callout = `<b>Net by fuel.</b> `
     + rows.filter((r) => r.a || r.r).slice().sort((x, y) => Math.abs(y.n) - Math.abs(x.n)).slice(0, 4).map((r) => `${gl[r.k]} ${r.n >= 0 ? '+' : '−'}${nf0.format(Math.abs(r.n))} MW (${nf0.format(r.a)} added, ${nf0.format(r.r)} retired)`).join('; ')
-    + `. Capacity is ${basisTxt}. Added and retired capacity say what is installed, not how much any unit ran.`;
+    + `. Capacity is ${basisTxt}. Added and retired capacity say what is installed, not how much any unit ran. They are not comparable with the TWh changes in the fuel-mix chart above: that chart counts the output of every unit, new and existing, and a MW of solar or wind produces far fewer TWh in a year than a MW of a unit that can run around the clock. Storage adds MW but moves energy rather than making it.`;
   const v1 = {
     id: 'quarter', label: 'Added and retired by quarter', height: 400,
     note: `${esc(basisTxt[0].toUpperCase() + basisTxt.slice(1))} of generators${scopeNote || ''} by the quarter they reached operation (above zero) or retired (below zero). EIA lists retirements by month; operating months come from the generator inventory.`,
@@ -528,29 +563,6 @@ export function additionsFigure(host, { meta, units, winUnits, removed, snapshot
   return figure(host, {
     title, callout, views: [v1, v2, v3],
     foot: `Sources: EIA Open Data API, route <code>electricity/operating-generator-capacity</code> (EIA-860M), snapshot ${esc(snapshot)}, for additions; the "Retired" tab of EIA's monthly generator file (Form EIA-860M), for retirements dated ${esc(ymLabel(rm.retirement_months[0]))} to ${esc(ymLabel(rm.retirement_months[1]))}.${scopeLabel === 'pjm' ? " A retired unit counts as PJM when EIA's balancing authority code on the Retired tab says PJM (a plant ID match to the PJM snapshots where the code is blank)." : ''} ${xc ? `Between the ${esc(removedBaseline)} and ${esc(snapshot)} snapshots, ${nf0.format(xc.left_inventory_units)} units left the operating inventory; ${nf0.format(xc.of_which_on_retired_tab)} of them are on the Retired tab and ${nf0.format(xc.left_inventory_not_on_retired_tab_units)} (${nf0.format(xc.left_inventory_not_on_retired_tab_nameplate_mw)} MW nameplate) are not, so they may have been reclassified or renumbered and are not counted as retirements here.` : ''}`,
-  });
-}
-
-// ---------------------------------------------------------------- IM3 records by state
-export function dcFigure(host, { dcs, dcMeta, states, limit = 15, scopeText }) {
-  const rows = {};
-  dcs.filter((d) => !states || states.has(d.state_abb)).forEach((d) => { (rows[d.state_abb] ??= { building: 0, campus: 0, point: 0 })[d.type] += 1; });
-  const list = Object.entries(rows).map(([s, v]) => ({ s, ...v, n: v.building + v.campus + v.point })).sort((a, c) => c.n - a.n).slice(0, limit);
-  if (!list.length) return null;
-  return simple(host, {
-    title: `${list[0].s} has the most IM3 data center records ${scopeText}: ${nf0.format(list[0].n)}`,
-    note: `IM3 records per state${states ? '' : ` (top ${list.length})`}. A campus and the buildings inside it are separate records, so these are not facility counts, and IM3 carries no online dates or power figures.${states ? ' States are counted whole even where only part of the state is in PJM.' : ''}`,
-    foot: `Source: IM3 Open Source Data Center Atlas, file version 2026.11.02 (${nf0.format(dcMeta.rows)} records; ${nf0.format(dcMeta.multi_county_rows_merged)} records listed once per county were merged). Licensed ODbL; derived from OpenStreetMap, so coverage depends on what mappers have drawn.`,
-    tableHtml: table(['State', 'Building', 'Campus', 'Point', 'All records'], list.map((r) => [r.s, nf0.format(r.building), nf0.format(r.campus), nf0.format(r.point), nf0.format(r.n)])),
-    draw: (cv) => new Chart(cv, {
-      type: 'bar',
-      data: { labels: list.map((r) => r.s), datasets: [{ data: list.map((r) => r.n), backgroundColor: DC_COLOR, borderRadius: 5, maxBarThickness: 30 }] },
-      options: {
-        maintainAspectRatio: false,
-        plugins: { legend: { display: false }, tooltip: { callbacks: { label: (c) => { const r = list[c.dataIndex]; return [`${nf0.format(r.n)} records`, `${r.building} building, ${r.campus} campus, ${r.point} point`]; } } } },
-        scales: { x: { grid: { display: false } }, y: { grid: { color: GRID }, title: { display: true, text: 'IM3 records' } } },
-      },
-    }),
   });
 }
 

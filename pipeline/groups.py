@@ -28,5 +28,8 @@ GEN_SOURCE = {
 FUEL930 = {
     "NG": "gas", "COL": "coal", "NUC": "nuclear", "SUN": "solar", "WND": "wind", "WAT": "hydro",
     "BAT": "storage", "PS": "storage", "ESS": "storage",
+    # Added to EIA-930 in 2025. EIA's names: OES other energy storage, UES unknown energy storage,
+    # SNB solar with integrated battery storage, WNB wind with integrated battery storage.
+    "OES": "storage", "UES": "storage", "SNB": "solar", "WNB": "wind",
     "OIL": "other", "OTH": "other", "GEO": "other", "BIO": "other", "UNK": "other",
 }

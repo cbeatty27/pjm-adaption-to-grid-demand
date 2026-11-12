@@ -43,7 +43,9 @@ ROUTE_SUBBA = "electricity/rto/region-sub-ba-data"
 ROUTE_FUEL = "electricity/rto/fuel-type-data"
 ROUTE_RETAIL = "electricity/retail-sales"
 
-HOURLY_START = dt.date(2019, 1, 1)  # EIA-930 history used for context
+DEMAND_START = dt.date(2015, 7, 1)  # EIA-930 demand data begin in July 2015: every month EIA has is pulled
+FUEL_START = dt.date(2018, 7, 1)    # EIA-930 net generation by fuel begins in July 2018 (quarters before it return no rows)
+HOURLY_START = dt.date(2019, 1, 1)  # PJM subregion (zone) series; only the baseline and latest windows use it
 BASELINE_PERIOD = "2022-11"  # month of ChatGPT's public release (2022-11-30)
 
 
@@ -61,11 +63,11 @@ def quarters(start: dt.date, end: dt.date):
             y, q = y + 1, 0
 
 
-def pull_hourly(route: str, facets: dict, tag: str) -> pd.DataFrame:
+def pull_hourly(route: str, facets: dict, tag: str, start: dt.date = HOURLY_START) -> pd.DataFrame:
     """Pull hourly rows for a route, one quarter at a time, caching finished quarters."""
     today = dt.date.today()
     frames = []
-    for qs, qe in quarters(HOURLY_START, today):
+    for qs, qe in quarters(start, today):
         f = CACHE / f"{tag}_{qs:%Y%m%d}.csv.gz"
         stable = qe < today - dt.timedelta(days=60)
         if f.exists() and stable:
@@ -249,11 +251,11 @@ def main() -> int:
         }
         print(name, prov["routes"][name])
 
-    demand = pull_hourly(ROUTE_DEMAND, {"respondent": "PJM", "type": "D"}, "demand")
+    demand = pull_hourly(ROUTE_DEMAND, {"respondent": "PJM", "type": "D"}, "demand", DEMAND_START)
     demand.to_csv(CACHE / "demand_hourly.csv.gz", index=False, compression="gzip")
     prov["routes"]["demand"]["rows"] = len(demand)
 
-    fuel = pull_hourly(ROUTE_FUEL, {"respondent": "PJM"}, "fuel")
+    fuel = pull_hourly(ROUTE_FUEL, {"respondent": "PJM"}, "fuel", FUEL_START)
     fuel.to_csv(CACHE / "fuel_hourly.csv.gz", index=False, compression="gzip")
     prov["routes"]["fuel"]["rows"] = len(fuel)
 
@@ -263,12 +265,12 @@ def main() -> int:
 
     # United States (Lower 48) series
     check_respondent(ROUTE_DEMAND, "US48")
-    demand_us = pull_hourly(ROUTE_DEMAND, {"respondent": "US48", "type": "D"}, "demandus")
+    demand_us = pull_hourly(ROUTE_DEMAND, {"respondent": "US48", "type": "D"}, "demandus", DEMAND_START)
     demand_us.to_csv(CACHE / "demand_us_hourly.csv.gz", index=False, compression="gzip")
     prov["routes"]["demand_us"] = {"route": ROUTE_DEMAND, "respondent": "US48", "rows": len(demand_us)}
 
     check_respondent(ROUTE_FUEL, "US48")
-    fuel_us = pull_hourly(ROUTE_FUEL, {"respondent": "US48"}, "fuelus")
+    fuel_us = pull_hourly(ROUTE_FUEL, {"respondent": "US48"}, "fuelus", FUEL_START)
     fuel_us.to_csv(CACHE / "fuel_us_hourly.csv.gz", index=False, compression="gzip")
     prov["routes"]["fuel_us"] = {"route": ROUTE_FUEL, "respondent": "US48", "rows": len(fuel_us)}
 

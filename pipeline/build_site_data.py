@@ -192,6 +192,8 @@ OUT_HI, OUT_LO, OUT_WINDOW = 1.5, 0.5, "7D"
 ZONE_HI, ZONE_LO = 3.0, 0.25
 # A month is used in charts and 12-month windows only when at least this share of its hours is present.
 MIN_COVERAGE = 0.95
+# A day is drawn in the daily chart when it has at least this many hours of data.
+DAY_MIN_HOURS = 20
 
 
 def drop_outlier_hours(df: pd.DataFrame, label: str, hi: float = OUT_HI, lo: float = OUT_LO) -> tuple[pd.DataFrame, list[dict]]:
@@ -275,9 +277,9 @@ def build_demand(meta: dict, scope: str = "pjm") -> None:
         "latest": {"from": latest_lo, "to": latest_hi, **window_stats(d, latest_lo, latest_hi)},
         "zones": {},
     }
-    # the same 12-month window one to five years earlier, when the data reach that far back
+    # the same 12-month window one to ten years earlier, when the data reach that far back
     five = {}
-    for k in range(1, 6):
+    for k in range(1, 11):
         lo_k, hi_k = shift_month(latest_lo, -12 * k), shift_month(latest_hi, -12 * k)
         if lo_k >= months[0] and agg[(agg["m"] >= lo_k) & (agg["m"] <= hi_k)]["cov"].ge(MIN_COVERAGE).all() and \
                 len(agg[(agg["m"] >= lo_k) & (agg["m"] <= hi_k)]) == 12:
@@ -290,7 +292,19 @@ def build_demand(meta: dict, scope: str = "pjm") -> None:
             if b and l:
                 comparison["zones"][z] = {"baseline": b, "latest": l}
 
-    out = {"monthly": monthly, "zones": zones, "comparison": comparison, "tz": TZ}
+    # every day with at least DAY_MIN_HOURS hours of data (Eastern-time days; daylight-saving days have 23 or 25 hours)
+    d["day"] = d["ts"].dt.strftime("%Y-%m-%d")
+    dg = d.groupby("day")["val"].agg(avg="mean", peak="max", n="count")
+    dg = dg[dg["n"] >= DAY_MIN_HOURS]
+    all_days = pd.date_range(dg.index.min(), dg.index.max(), freq="D").strftime("%Y-%m-%d")
+    dg = dg.reindex(all_days)
+    daily = {
+        "start": all_days[0],
+        "avg_mw": [None if pd.isna(v) else int(round(v)) for v in dg["avg"]],
+        "peak_mw": [None if pd.isna(v) else int(round(v)) for v in dg["peak"]],
+    }
+
+    out = {"monthly": monthly, "daily": daily, "zones": zones, "comparison": comparison, "tz": TZ}
     (OUT / ("demand_us.json" if us else "demand.json")).write_text(json.dumps(out, separators=(",", ":")))
     meta["demand_us" if us else "demand"] = {
         "hourly_rows": n_all, "non_positive_rows_dropped": nonpos, "months": len(months),
@@ -304,6 +318,7 @@ def build_demand(meta: dict, scope: str = "pjm") -> None:
         "outlier_hours_dropped_pjm": sum(1 for r in dropped if r["series"] == label),
         "outlier_hours": dropped[:400],
         "first_month": months[0], "last_month": months[-1], "zones": sorted(zones),
+        "daily_min_hours": DAY_MIN_HOURS, "days_in_daily_series": int(dg["avg"].notna().sum()),
         "partial_months": [m for m, c in zip(months, monthly["coverage"]) if c < MIN_COVERAGE],
     }
 
@@ -315,6 +330,8 @@ def build_fuel(meta: dict, scope: str = "pjm") -> None:
     f["group"] = f["fueltype"].map(lambda c: G.FUEL930.get(c, "other"))
     unmapped = sorted(set(f.loc[~f["fueltype"].isin(G.FUEL930), "fueltype"]))
     f["m"] = month_key(f["ts"])
+    name_col = next((c for c in ("type-name", "fueltype-name", "fuel-type-name") if c in f.columns), None)
+    code_names = ({c: str(n) for c, n in f.drop_duplicates("fueltype").set_index("fueltype")[name_col].items()} if name_col else {})
     mg = f.groupby(["m", "group"])["val"].sum().unstack(fill_value=0.0)
     mg = mg.reindex(columns=[k for k, _ in G.GROUPS], fill_value=0.0)
     hours = f.groupby("m")["ts"].nunique()
@@ -327,6 +344,8 @@ def build_fuel(meta: dict, scope: str = "pjm") -> None:
         "coverage": cov,
         "codes_seen": sorted(set(f["fueltype"])),
         "codes_unmapped": unmapped,
+        "code_names": code_names,
+        "code_groups": {c: G.FUEL930.get(c, "other") for c in sorted(set(f["fueltype"]))},
     }
     full = [m for m, c in zip(months, cov) if c >= MIN_COVERAGE]
     hi = full[-1]
@@ -341,7 +360,7 @@ def build_fuel(meta: dict, scope: str = "pjm") -> None:
         "latest": {"from": lo, "to": hi, "gwh": win(lo, hi)},
     }
     (OUT / ("fuelmix_us.json" if us else "fuelmix.json")).write_text(json.dumps(out, separators=(",", ":")))
-    meta["fuel_us" if us else "fuel"] = {"min_coverage": MIN_COVERAGE, "hourly_rows": int(len(f)), "codes_unmapped": unmapped, "first_month": months[0], "last_month": months[-1]}
+    meta["fuel_us" if us else "fuel"] = {"min_coverage": MIN_COVERAGE, "hourly_rows": int(len(f)), "codes_unmapped": unmapped, "code_names": code_names, "code_groups": {c: G.FUEL930.get(c, "other") for c in sorted(set(f["fueltype"]))}, "first_month": months[0], "last_month": months[-1]}
 
 
 def build_retail(meta: dict) -> None:

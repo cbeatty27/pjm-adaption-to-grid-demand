@@ -24,9 +24,12 @@ def main() -> int:
     m = dem["monthly"]
     if len(m["months"]) < 60:
         errs.append(f"only {len(m['months'])} demand months")
-    good = [a for a, c in zip(m["avg_mw"], m["coverage"]) if c >= 0.97]
+    good = [a for mo, a, c in zip(m["months"], m["avg_mw"], m["coverage"]) if c >= 0.97 and mo >= "2019-01"]
     if not good or not all(50_000 < a < 200_000 for a in good):
         errs.append("monthly average demand outside 50-200 GW")
+    early = [mo for mo, a, c in zip(m["months"], m["avg_mw"], m["coverage"]) if c >= 0.95 and mo < "2019-01" and not 50_000 < a < 200_000]
+    if early:
+        print(f"note: PJM monthly average demand outside 50-200 GW in {len(early)} months before 2019 ({early[0]} to {early[-1]}); check them on the chart")
     for k in ("baseline", "latest"):
         if not 50_000 < dem["comparison"][k]["avg_mw"] < 200_000:
             errs.append(f"{k} average demand outside 50-200 GW")
@@ -35,7 +38,7 @@ def main() -> int:
     if not dem["zones"]:
         errs.append("no PJM subregion (zone) data")
     gs = fuel["comparison"]["latest"]["gwh"]
-    total = sum(v for k, v in gs.items() if k != "storage")
+    total = sum(gs.values())
     if not 400_000 < total < 1_200_000:
         errs.append(f"latest 12-month PJM generation {total/1000:.0f} TWh outside 400-1200 TWh")
     if gs.get("gas", 0) <= 0:
@@ -51,13 +54,16 @@ def main() -> int:
         if sum(1 for o in uon if o and o >= "2022-12") < 500:
             errs.append("fewer than 500 U.S. operating units dated Dec 2022 or later")
         um = us_dem["monthly"]
-        ugood = [a for a, c in zip(um["avg_mw"], um["coverage"]) if c >= 0.95]
+        ugood = [a for mo, a, c in zip(um["months"], um["avg_mw"], um["coverage"]) if c >= 0.95 and mo >= "2019-01"]
         if not ugood or not all(250_000 < a < 800_000 for a in ugood):
             errs.append("U.S. monthly average demand outside 250-800 GW")
+        uearly = [mo for mo, a, c in zip(um["months"], um["avg_mw"], um["coverage"]) if c >= 0.95 and mo < "2019-01" and not 250_000 < a < 800_000]
+        if uearly:
+            print(f"note: U.S. monthly average demand outside 250-800 GW in {len(uearly)} months before 2019 ({uearly[0]} to {uearly[-1]}); check them on the chart")
         if max(p for p in um["peak_mw"] if p is not None) > 1_000_000:
             errs.append("a U.S. monthly peak above 1,000 GW survived cleaning")
         ug = us_fuel["comparison"]["latest"]["gwh"]
-        utot = sum(v for k, v in ug.items() if k != "storage")
+        utot = sum(ug.values())
         if not 2_500_000 < utot < 6_000_000:
             errs.append(f"latest 12-month U.S. generation {utot/1000:.0f} TWh outside 2500-6000 TWh")
     rt = meta.get("retired", {})

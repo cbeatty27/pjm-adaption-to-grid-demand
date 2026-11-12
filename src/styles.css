@@ -163,12 +163,14 @@ main { flex: 1; min-height: 0; outline: none; }
 .cmp__k { font-size: 13px; color: var(--ink-3); display: flex; justify-content: space-between; align-items: baseline; }
 .cmp__d { font-weight: 700; color: #a8561a; font-size: 18px; letter-spacing: -0.01em; }
 .cmp__d.down { color: #3a6a8a; }
-.cmp__row { display: grid; grid-template-columns: 44px 1fr 74px; gap: 8px; align-items: center; margin-top: 6px; font-size: 12px; color: var(--ink-3); }
+.cmp__row { display: grid; grid-template-columns: 62px 1fr 74px; gap: 8px; align-items: center; margin-top: 6px; font-size: 12px; color: var(--ink-3); }
 .cmp__row b { text-align: right; color: var(--ink); font-weight: 600; font-size: 13px; }
 .track { height: 10px; background: var(--rule-soft); border-radius: 5px; overflow: hidden; }
 .track i { display: block; height: 100%; border-radius: 5px; }
 .track i.before { background: var(--cool); }
 .track i.after { background: var(--warm); }
+.track i.old { background: #9fb8c6; }
+.cmp__sub { margin-top: 8px; font-size: 12px; line-height: 1.4; color: var(--ink-3); }
 
 /* ---------- sources ---------- */
 .src { background: var(--panel); border: 1px solid var(--rule); border-radius: var(--r-panel); margin: 16px 0; overflow: hidden; }
