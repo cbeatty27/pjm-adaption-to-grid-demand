@@ -63,6 +63,13 @@ export function mount(root, { meta, dcMeta }) {
       ${row('Not done', 'EIA has no data center sector. The chart does not allocate any sales to data centers.')}
     </dl></section>` : ''}
 
+    <section class="src"><h3>All the data tab: intervals, EIA-923 and screening</h3><dl>
+      ${row('What it shows', 'Every hour of EIA-930 demand (from July 2015) and net generation by fuel (from July 2018), for PJM and the Lower 48, with day, month and year summaries built from those hours. No comparison or explanation is added.')}
+      ${row('How intervals are built', 'Days are Eastern-time calendar days with at least 20 hourly values; months and years are the average of the hours present, with coverage (hours present divided by hours in the period) shown in the tooltip and table. Nothing is filled in. Hourly files are split by year (<code>hourly_*_YYYY.json</code>) and loaded when a year is opened.')}
+      ${row('Screening', 'Demand: a day or hour is dropped when it is above 1.5 or below 0.5 times its rolling 7-day median (3.0 and 0.25 for PJM zones). Generation: an hourly fuel-code value is dropped when above 5 times that code\'s 99.9th percentile of absolute values. The counts dropped are in <code>meta.json</code>.')}
+      ${row('EIA-923 (U.S. only)', 'Route <code>electricity/electric-power-operational-data</code>, monthly net generation in thousand MWh (GWh), U.S., all sectors, fuel ids coal, natural gas, nuclear, hydro, pumped storage, solar, wind and all fuels; "Other" is the total minus those. It is plant-reported, covers 50 states and DC and starts before 2018, so it is a different series from EIA-930 and the two are not added together. It is only pulled when <code>fetch_eia</code> runs, and the site works without it.')}
+    </dl></section>
+
     <section class="src"><h3>${US ? '4' : '3'}. IM3 Open Source Data Center Atlas</h3><dl>
       ${row('What it is', 'A national set of data center footprints and points from the U.S. Department of Energy\'s IM3 project at Pacific Northwest National Laboratory, derived from OpenStreetMap.')}
       ${row('Citation', 'Mongird, K., Thurber, T., Vernon, C., Burleyson, C., Akdemir, K. Z., Rice, J. IM3 Open Source Data Center Atlas. MSD-LIVE Data Repository. DOI 10.57931/2550666. Also at <a href="https://www.osti.gov/biblio/2550666">osti.gov/biblio/2550666</a>.')}

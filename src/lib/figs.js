@@ -567,3 +567,60 @@ export function additionsFigure(host, { meta, units, winUnits, removed, snapshot
 }
 
 export { SECTOR_COLOR, TIME, FUEL_COLOR, Chart };
+
+// ---------------------------------------------------------------- capacity added next to the change in energy produced
+// Two different measures: MW is what was installed, TWh is what the grid produced. Each row shows both, plus the most
+// the new MW could have produced in a year (MW x 8,760 hours), so a reader can see whether the new units could be the whole change.
+export function capacityGenFigure(host, { meta, fuel, winUnits, retired, scope, scopeLabel }) {
+  const groups = meta.groups;
+  const fb = fuel.comparison.baseline, fl = fuel.comparison.latest;
+  const useNet = !!retired && meta.retired?.capacity_basis === 'net summer capacity' && winUnits.some((u) => u.msum != null);
+  const mwOf = (u) => (useNet ? u.msum : u.mw) || 0;
+  const basis = useNet ? 'net summer capacity' : 'nameplate capacity';
+  const has = (k) => (fuel.gwh[k] || []).some((v) => v);
+  const rows = groups.map((g) => {
+    const add = sum(winUnits.filter((u) => u.group === g.key).map(mwOf));
+    const ret = sum((retired || []).filter((r) => r.group === g.key).map((r) => r.mw || 0));
+    const gen = has(g.key) ? (fl.gwh[g.key] - fb.gwh[g.key]) / 1000 : null;
+    const ceil = (add * 8760) / 1e6;
+    return { k: g.key, label: g.label, add, ret, gen, ceil, ratio: gen != null && ceil > 0 ? (100 * gen) / ceil : null };
+  }).filter((r) => r.add || r.ret || r.gen != null).sort((a, c) => c.add - a.add);
+  if (!rows.length) return null;
+  const maxCap = Math.max(...rows.map((r) => Math.max(r.add, r.ret)), 1);
+  const maxGen = Math.max(...rows.map((r) => Math.abs(r.gen ?? 0)), 1);
+  const cap = (v, color) => `<span class="cg__bar"><i style="width:${(100 * v) / maxCap}%;background:${color}"></i></span>`;
+  const gbar = (g, color) => {
+    if (g == null) return '<span class="cg__na">not reported</span>';
+    const w = (50 * Math.abs(g)) / maxGen;
+    return `<span class="cg__gen"><i style="width:${w}%;left:${g >= 0 ? 50 : 50 - w}%;background:${color}"></i></span>`;
+  };
+  const body = rows.map((r) => {
+    const over = r.ratio != null && r.ratio > 100;
+    return `<tr><th scope="row"><i class="cg__dot" style="background:${FUEL_COLOR[r.k]}"></i>${esc(r.label)}</th>
+      <td>${cap(r.add, FUEL_COLOR[r.k])}<b>${nf0.format(r.add)} MW</b></td>
+      <td>${cap(r.ret, '#8d9aa2')}<b>${nf0.format(r.ret)} MW</b></td>
+      <td>${gbar(r.gen, FUEL_COLOR[r.k])}<b>${r.gen == null ? '' : `${sgn(r.gen)} TWh`}</b></td>
+      <td class="cg__n">${r.add ? `${nf0.format(r.ceil)} TWh` : '–'}</td>
+      <td class="cg__n ${over ? 'cg__flag' : ''}">${r.ratio == null ? '–' : `${nf0.format(r.ratio)}%`}${over ? '<small>more than the new units could make</small>' : ''}</td></tr>`;
+  }).join('');
+  const html = `<div class="tbl-wrap"><table class="cg"><thead><tr>
+    <th scope="col">Fuel</th>
+    <th scope="col">Capacity added<small>MW installed (${esc(basis)})</small></th>
+    <th scope="col">Capacity retired<small>MW removed</small></th>
+    <th scope="col">Change in energy produced<small>TWh, latest 12 months vs the 12 before ChatGPT</small></th>
+    <th scope="col">Most the added MW could make in a year<small>MW × 8,760 hours, if it never stopped</small></th>
+    <th scope="col">Energy change as a share of that<small>above 100% means other units changed too</small></th></tr></thead><tbody>${body}</tbody></table></div>`;
+  const ex = rows.filter((r) => r.add > 0 && r.ratio != null && r.k !== 'storage').slice(0, 3)
+    .map((r) => `<b>${esc(r.label)}</b>: ${nf0.format(r.add)} MW added could make at most ${nf0.format(r.ceil)} TWh in a year; the energy produced changed ${sgn(r.gen)} TWh, ${nf0.format(r.ratio)}% of that maximum.`).join(' ');
+  const over = rows.filter((r) => r.ratio != null && r.ratio > 100);
+  const callout = `<b>Read each row as two separate facts.</b> Megawatts say how much was installed. Terawatt-hours say how much the grid produced, and that counts every unit, new and old, after retirements. ${ex}`
+    + (over.length ? ` Where the change is above 100% (${over.map((r) => esc(r.label)).join(', ')}), the new units cannot be all of it: units that were already operating produced more in total, after retirements.` : '')
+    + (rows.some((r) => r.k === 'storage' && r.gen == null) ? ' Storage has no generation figure here because EIA-930 carries no storage codes for this series.' : '')
+    + (rows.some((r) => r.k === 'storage' && r.add) ? ' Storage moves energy rather than making it, so a large storage capacity does not mean a large energy change.' : '');
+  return figure(host, {
+    title: `${scope}: capacity added since December 2022 next to the change in energy produced`,
+    callout,
+    views: [{ id: 'rows', label: 'By fuel', note: `The first two bars show what was built or removed (MW). The next shows what the grid produced (TWh). The last two columns give a ceiling for how much of that the new units could account for. These are different units answering different questions, so the bars are not on one scale.`, table: html }],
+    foot: `Sources: capacity from EIA's generator inventory (EIA-860M, ${esc(basis)}) and, for retirements, its Retired tab; energy from EIA-930 net generation by fuel. The ceiling assumes a unit runs every hour of a year; units that started partway through the window could make less, and it is only a bound, not an estimate of what any unit produced.`,
+  });
+}

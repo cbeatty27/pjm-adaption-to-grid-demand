@@ -1,6 +1,6 @@
 import { esc, nf0, nf1, pct, pp, ymLabel, ymIndex, sum } from '../lib/format.js';
 import { TIME } from '../lib/fuels.js';
-import { Chart, GRID, table, simple, demandFigure, fuelFigure, additionsFigure, dem, sgn, twhOf } from '../lib/figs.js';
+import { Chart, GRID, table, simple, demandFigure, fuelFigure, additionsFigure, capacityGenFigure, dem, sgn, twhOf } from '../lib/figs.js';
 
 export function mount(root, data) {
   const { meta, demand, fuel, units } = data;
@@ -70,6 +70,7 @@ export function mount(root, data) {
 
   push(fuelFigure(figs, { meta, fuel, fm: meta.fuel, scope: 'PJM' }));
   push(additionsFigure(figs, { meta, units, winUnits, removed: data.removed, snapshot: meta.plants.snapshot_period, removedBaseline: data.removedBaseline, scopeNote: ' in the PJM balancing authority', retired: pjmRetired, scopeLabel: 'pjm' }));
+  push(capacityGenFigure(figs, { meta, fuel, winUnits, retired: pjmRetired, scope: 'PJM', scopeLabel: 'pjm' }));
 
   return () => parts.forEach((p) => p.destroy());
 }

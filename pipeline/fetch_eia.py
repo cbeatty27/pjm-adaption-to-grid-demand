@@ -12,6 +12,7 @@ Routes used (all EIA Open Data API v2):
   electricity/rto/region-data                EIA-930 U.S. Lower 48 demand (respondent US48)
   electricity/rto/fuel-type-data             EIA-930 U.S. Lower 48 net generation by fuel (respondent US48)
   electricity/retail-sales                   EIA retail electricity sales, U.S. total, by sector (optional)
+  electricity/electric-power-operational-data  EIA-923 monthly net generation by fuel, U.S. total, all sectors (optional)
 
 Also downloaded (not an API route): EIA's monthly generator file (Form EIA-860M, XLSX) from
 https://www.eia.gov/electricity/data/eia860m/ , whose "Retired" tab lists generators that retired.
@@ -42,6 +43,7 @@ ROUTE_DEMAND = "electricity/rto/region-data"
 ROUTE_SUBBA = "electricity/rto/region-sub-ba-data"
 ROUTE_FUEL = "electricity/rto/fuel-type-data"
 ROUTE_RETAIL = "electricity/retail-sales"
+ROUTE_OPS = "electricity/electric-power-operational-data"  # EIA-923 monthly net generation by fuel, by state and sector
 
 DEMAND_START = dt.date(2015, 7, 1)  # EIA-930 demand data begin in July 2015: every month EIA has is pulled
 FUEL_START = dt.date(2018, 7, 1)    # EIA-930 net generation by fuel begins in July 2018 (quarters before it return no rows)
@@ -159,6 +161,35 @@ def pull_retail(prov: dict) -> None:
         prov["retail_us"] = {"error": str(e)[:300]}
 
 
+OPS_START = "2015-01"
+OPS_FUELS = ["ALL", "COL", "NG", "NUC", "HYC", "HPS", "SUN", "WND"]  # ids asked for; only ids the route lists are requested
+
+
+def pull_ops923(prov: dict) -> None:
+    """Optional: EIA-923 monthly net generation by fuel for the whole U.S. (all sectors), back to 2015, so generation
+    can be followed further back than EIA-930 (which has fuel data only from July 2018). Never stops the run."""
+    try:
+        listed = eia.facet_values(ROUTE_OPS, "fueltypeid")
+        have = {f.get("id"): f.get("name") for f in listed}
+        use = [f for f in OPS_FUELS if f in have]
+        if "ALL" not in use or len(use) < 4:
+            raise eia.EIAError(f"fuel ids not as expected; route lists {sorted(have)[:40]}")
+        params = {
+            "frequency": "monthly", "data[]": ["generation"], "start": OPS_START,
+            "facets[location][]": "US", "facets[sectorid][]": "99", "facets[fueltypeid][]": use,
+            "sort[0][column]": "period", "sort[0][direction]": "asc",
+        }
+        rows = eia.fetch_all(ROUTE_OPS, params)
+        df = pd.DataFrame(rows)
+        df.to_csv(CACHE / "gen923_us.csv.gz", index=False, compression="gzip")
+        prov["gen923_us"] = {"route": ROUTE_OPS, "rows": len(df), "columns": list(df.columns), "fuel_ids_requested": use,
+                             "fuel_ids_listed_by_route": have}
+        print(f"EIA-923 generation (US, all sectors): {len(df):,} rows; fuel ids {use}")
+    except Exception as e:  # noqa: BLE001
+        print(f"WARNING: EIA-923 generation pull skipped: {e}", file=sys.stderr)
+        prov["gen923_us"] = {"error": str(e)[:300]}
+
+
 EIA860M_PAGE = "https://www.eia.gov/electricity/data/eia860m/"
 MONTHS = ["january", "february", "march", "april", "may", "june", "july", "august", "september", "october", "november", "december"]
 
@@ -230,6 +261,12 @@ def pull_retired(prov: dict) -> None:
 
 
 def main() -> int:
+    if "--gen923-only" in sys.argv:
+        pf = CACHE / "provenance_eia.json"
+        prov = json.loads(pf.read_text()) if pf.exists() else {"retrieved_at_utc": dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds"), "routes": {}}
+        pull_ops923(prov)
+        pf.write_text(json.dumps(prov, indent=2))
+        return 0 if "error" not in prov.get("gen923_us", {}) else 1
     if "--retired-only" in sys.argv:
         pf = CACHE / "provenance_eia.json"
         prov = json.loads(pf.read_text()) if pf.exists() else {"retrieved_at_utc": dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds"), "routes": {}}
@@ -275,6 +312,7 @@ def main() -> int:
     prov["routes"]["fuel_us"] = {"route": ROUTE_FUEL, "respondent": "US48", "rows": len(fuel_us)}
 
     pull_retail(prov)
+    pull_ops923(prov)
     pull_retired(prov)
 
     (CACHE / "provenance_eia.json").write_text(json.dumps(prov, indent=2))

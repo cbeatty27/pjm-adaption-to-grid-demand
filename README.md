@@ -2,11 +2,11 @@
 
 A study of how the PJM Interconnection's generation and demand changed from the public release of ChatGPT (November 30, 2022) to today, alongside the locations of data centers in the IM3 atlas.
 
-The site has five tabs: U.S. demand (the Lower 48 total, ten-year and five-year growth), a U.S. map with a timeline slider, a PJM map, a PJM case study (demand, zone growth, fuel mix, generator additions) and a sources and method page. The U.S. tabs appear empty until the data pipeline has been run with the U.S. pulls.
+The site has six tabs: U.S. demand (the Lower 48 total, ten-year and five-year growth), a U.S. map with a timeline slider, a PJM map, a PJM case study (demand, zone growth, fuel mix, generator additions) an All the data tab (every hour, day, month and year of demand and generation by fuel that EIA publishes, with CSV download) and a sources and method page. The U.S. tabs appear empty until the data pipeline has been run with the U.S. pulls.
 
 ## Data sources
 
-Only two datasets supply data. Details, fields and limits are on the site's Sources tab.
+Only two datasets supply data (EIA includes the optional EIA-923 monthly generation series). Details, fields and limits are on the site's Sources tab.
 
 1. **EIA Open Data API v2** (`api.eia.gov`): generator inventory (`electricity/operating-generator-capacity`, EIA-860M based) and EIA-930 PJM demand, subregion demand and fuel mix (`electricity/rto/*`).
 2. **IM3 Open Source Data Center Atlas** (PNNL, DOI 10.57931/2550666, ODbL), file version 2026.11.02, in `data/raw/im3/`.

@@ -75,6 +75,17 @@ def main() -> int:
             errs.append(f"U.S. capacity retired since Dec 2022 is {tot:,.0f} MW, outside 3-150 GW")
         if not any(r[rc.index("pjm")] for r in ret["rows"]):
             errs.append("no retired unit matched a PJM plant ID")
+    for scope, info in (meta.get("explorer") or {}).items():
+        for f in [f"explorer_{scope}.json"] + info.get("hourly_files", []):
+            if not (OUT / f).exists():
+                errs.append(f"explorer file {f} is listed in meta but missing")
+        if (OUT / f"explorer_{scope}.json").exists():
+            ex = json.loads((OUT / f"explorer_{scope}.json").read_text())
+            vals = [v for v in ex["daily"]["demand"]["avg_mw"] if v is not None]
+            if len(vals) < 365 * 3:
+                errs.append(f"explorer {scope}: only {len(vals)} days of demand")
+            elif not 1_000 < min(vals) and scope == "pjm":
+                errs.append(f"explorer {scope}: a daily demand value is implausibly low")
     if errs:
         print("VALIDATION FAILED:\n - " + "\n - ".join(errs))
         return 1

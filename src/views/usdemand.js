@@ -1,6 +1,6 @@
 import { esc, nf0, nf1, pct, ymLabel, ymIndex, sum } from '../lib/format.js';
 import { SECTOR_COLOR, TIME } from '../lib/fuels.js';
-import { Chart, GRID, table, figure, demandFigure, fuelFigure, additionsFigure, barEndLabels, barTopLabels, dem, sgn, twhOf } from '../lib/figs.js';
+import { Chart, GRID, table, figure, demandFigure, fuelFigure, additionsFigure, capacityGenFigure, barEndLabels, barTopLabels, dem, sgn, twhOf } from '../lib/figs.js';
 
 const SECTORS = ['RES', 'COM', 'IND', 'TRA', 'OTH'];
 const WORD_N = { 1: 'one', 2: 'two', 3: 'three', 4: 'four', 5: 'five', 6: 'six', 7: 'seven', 8: 'eight', 9: 'nine', 10: 'ten' };
@@ -129,5 +129,6 @@ export function mount(root, data, us) {
   if (us.retail) push(retailFigure(figs, us.retail, meta));
   push(fuelFigure(figs, { meta, fuel, fm: meta.fuel_us, scope: 'U.S.' }));
   push(additionsFigure(figs, { meta, units: us.units, winUnits, removed: us.removed, snapshot: meta.plants_us.snapshot_period, removedBaseline: us.removedBaseline, scopeNote: ' in the 50 states', retired: data.retired, scopeLabel: 'us' }));
+  push(capacityGenFigure(figs, { meta, fuel, winUnits, retired: data.retired, scope: 'U.S.', scopeLabel: 'us' }));
   return () => parts.forEach((p) => p.destroy());
 }

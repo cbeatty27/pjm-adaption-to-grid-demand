@@ -363,6 +363,170 @@ def build_fuel(meta: dict, scope: str = "pjm") -> None:
     meta["fuel_us" if us else "fuel"] = {"min_coverage": MIN_COVERAGE, "hourly_rows": int(len(f)), "codes_unmapped": unmapped, "code_names": code_names, "code_groups": {c: G.FUEL930.get(c, "other") for c in sorted(set(f["fueltype"]))}, "first_month": months[0], "last_month": months[-1]}
 
 
+# ---------------------------------------------------------------- explorer: every interval of demand and generation
+GEN_GUARD = 5.0  # a fuel code's hourly value is dropped when it is more than this many times its own 99.9th percentile (absolute)
+OPS_MAP = {"COL": "coal", "NG": "gas", "NUC": "nuclear", "HYC": "hydro", "HPS": "storage", "SUN": "solar", "WND": "wind"}
+
+
+def _ints(a, nd: int = 0) -> list:
+    """numpy array -> list of numbers with None for missing (JSON null)."""
+    out = []
+    for v in a:
+        if v is None or (isinstance(v, float) and np.isnan(v)):
+            out.append(None)
+        else:
+            out.append(int(round(float(v))) if nd == 0 else round(float(v), nd))
+    return out
+
+
+def _agg_block(dem: pd.Series, gen: pd.DataFrame, key_dem, key_gen, labels, nd: int, min_hours: int = 0, expected=None) -> dict:
+    """Aggregate hourly demand (UTC-indexed Series) and generation (DataFrame, one column per group) by a grouping key."""
+    g = dem.groupby(key_dem)
+    d = pd.DataFrame({"avg": g.mean(), "max": g.max(), "min": g.min(), "n": g.count()}).reindex(labels)
+    ok = d["n"].fillna(0) >= min_hours
+    block = {
+        "demand": {
+            "avg_mw": _ints(d["avg"].where(ok), nd), "max_mw": _ints(d["max"].where(ok), nd), "min_mw": _ints(d["min"].where(ok), nd),
+            "hours": [int(v) if not pd.isna(v) else 0 for v in d["n"]],
+        },
+    }
+    if gen is not None and len(gen.columns):
+        gg = gen.groupby(key_gen)
+        gavg = gg.mean().reindex(labels)
+        gcnt = gen.notna().any(axis=1).groupby(key_gen).sum().reindex(labels).fillna(0)
+        gok = gcnt >= min_hours
+        block["gen"] = {
+            "avg_mw": {c: _ints(gavg[c].where(gok), nd) for c in gen.columns},
+            "hours": [int(v) for v in gcnt],
+        }
+    if expected is not None:
+        block["demand"]["coverage"] = [round(float(h) / e, 4) if e else None for h, e in zip(block["demand"]["hours"], expected)]
+        if "gen" in block:
+            block["gen"]["coverage"] = [round(float(h) / e, 4) if e else None for h, e in zip(block["gen"]["hours"], expected)]
+    return block
+
+
+def build_explorer(meta: dict, scope: str = "pjm") -> None:
+    """Every hour, day, month and year of demand and net generation by fuel the EIA-930 pulls contain, for the explorer tab.
+
+    Hourly values are shipped in one file per UTC calendar year (past years never change, so a weekly rebuild only rewrites
+    the current year). Days, months and years are grouped in Eastern time. Demand uses the same reporting-error screen as the
+    other charts; generation hours are as reported except for impossible values (see GEN_GUARD). Nothing is filled in."""
+    us = scope == "us"
+    label = "US48" if us else "PJM"
+    d = hourly_et(read("demand_us_hourly.csv.gz" if us else "demand_hourly.csv.gz")).dropna(subset=["val"])
+    d = d[d["val"] > 0].drop_duplicates(subset="ts")
+    d, _ = drop_outlier_hours(d, label)
+    dem = pd.Series(d["val"].to_numpy(), index=d["ts"].dt.tz_convert("UTC")).sort_index()
+
+    f = hourly_et(read("fuel_us_hourly.csv.gz" if us else "fuel_hourly.csv.gz")).dropna(subset=["val"])
+    f = f.drop_duplicates(subset=["ts", "fueltype"])
+    dropped = []
+    keep = pd.Series(True, index=f.index)
+    for code, gdf in f.groupby("fueltype"):
+        q = float(np.nanquantile(gdf["val"].abs(), 0.999)) if len(gdf) else 0.0
+        if q > 0:
+            bad = gdf.index[gdf["val"].abs() > GEN_GUARD * q]
+            keep.loc[bad] = False
+            dropped += [{"code": code, "hour_et": f.loc[i, "ts"].strftime("%Y-%m-%d %H:00"), "value_mw": round(float(f.loc[i, "val"]), 1)} for i in bad[:20]]
+    n_dropped = int((~keep).sum())
+    f = f[keep]
+    f["group"] = f["fueltype"].map(lambda c: G.FUEL930.get(c, "other"))
+    f["utc"] = f["ts"].dt.tz_convert("UTC")
+    gen = f.groupby(["utc", "group"])["val"].sum(min_count=1).unstack()
+    order = [k for k, _ in G.GROUPS if k in gen.columns and gen[k].notna().any()]
+    gen = gen.reindex(columns=order)
+
+    last = max(dem.index.max(), gen.index.max() if len(gen) else dem.index.max())
+    idx = pd.date_range(dem.index.min().floor("h"), last.floor("h"), freq="h", tz="UTC")
+    dem = dem.reindex(idx)
+    gen = gen.reindex(idx)
+
+    # hourly shards, one per UTC year
+    years = sorted(set(idx.year))
+    for y in years:
+        m = idx.year == y
+        shard = {"year": int(y), "start_utc": idx[m][0].strftime("%Y-%m-%dT%H"), "n": int(m.sum()), "demand_mw": _ints(dem[m].to_numpy())}
+        if len(gen.columns) and gen[m].notna().to_numpy().any():
+            shard["gen_mw"] = {c: _ints(gen[c][m].to_numpy()) for c in gen.columns}
+        (OUT / f"hourly_{scope}_{y}.json").write_text(json.dumps(shard, separators=(",", ":")))
+
+    et = idx.tz_convert(TZ)
+    dkey, mkey, ykey = et.strftime("%Y-%m-%d"), et.strftime("%Y-%m"), et.strftime("%Y")
+    days = pd.date_range(dkey.min(), dkey.max(), freq="D").strftime("%Y-%m-%d").tolist()
+    months = pd.period_range(mkey.min(), mkey.max(), freq="M").strftime("%Y-%m").tolist()
+    yrs = [str(y) for y in range(int(ykey.min()), int(ykey.max()) + 1)]
+    daily = _agg_block(dem, gen, dkey, dkey, days, 0, min_hours=DAY_MIN_HOURS)
+    daily.update({"start": days[0], "n": len(days)})
+    monthly = _agg_block(dem, gen, mkey, mkey, months, 1, expected=[expected_hours(m) for m in months])
+    monthly["months"] = months
+    exp_y = [sum(expected_hours(m) for m in months if m.startswith(y)) for y in yrs]
+    yearly = _agg_block(dem, gen, ykey, ykey, yrs, 1, expected=exp_y)
+    yearly["years"] = yrs
+    yearly["months_with_demand"] = [sum(1 for m, c in zip(months, monthly["demand"]["coverage"]) if m.startswith(y) and c is not None and c >= MIN_COVERAGE) for y in yrs]
+    if "gen" in monthly:
+        yearly["months_with_gen"] = [sum(1 for m, c in zip(months, monthly["gen"]["coverage"]) if m.startswith(y) and c is not None and c >= MIN_COVERAGE) for y in yrs]
+
+    out = {
+        "scope": scope, "series": label, "tz": TZ, "groups": order,
+        "hourly_years": [int(y) for y in years], "hourly_start_utc": idx[0].strftime("%Y-%m-%dT%H"), "hourly_end_utc": idx[-1].strftime("%Y-%m-%dT%H"),
+        "gen_first_hour_utc": (gen.dropna(how="all").index[0].strftime("%Y-%m-%dT%H") if len(gen.dropna(how="all")) else None),
+        "min_coverage": MIN_COVERAGE, "day_min_hours": DAY_MIN_HOURS,
+        "daily": daily, "monthly": monthly, "yearly": yearly,
+    }
+    if us:
+        out["monthly_923"] = build_ops923(meta)
+    (OUT / f"explorer_{scope}.json").write_text(json.dumps(out, separators=(",", ":")))
+    meta.setdefault("explorer", {})[scope] = {
+        "hourly_files": [f"hourly_{scope}_{y}.json" for y in years], "days": len(days), "months": len(months),
+        "first_hour_utc": out["hourly_start_utc"], "last_hour_utc": out["hourly_end_utc"],
+        "gen_first_hour_utc": out["gen_first_hour_utc"], "groups": order,
+        "gen_guard": f"hourly value dropped when above {GEN_GUARD:g} times that fuel code's 99.9th percentile of absolute values",
+        "gen_hours_dropped": n_dropped, "gen_hours_dropped_examples": dropped[:60],
+        "demand_hours_present": int(dem.notna().sum()), "gen_group_hours_present": {c: int(gen[c].notna().sum()) for c in gen.columns},
+        "has_923": bool(out.get("monthly_923")),
+    }
+
+
+def build_ops923(meta: dict) -> dict | None:
+    """EIA-923 monthly net generation by fuel, U.S. total all sectors (thousand MWh = GWh). Optional; None when not pulled."""
+    f = CACHE / "gen923_us.csv.gz"
+    if not f.exists() or "error" in meta.get("gen923_us", {}):
+        return None
+    meta.setdefault("gen923_us", {})
+    df = read("gen923_us.csv.gz")
+    c = resolve(df, period=["period"], fid=["fueltypeid"], fname=["fueltypedescription", "fueltypename"], gen=["generation"])
+    if not (c["period"] and c["fid"] and c["gen"]):
+        print(f"EIA-923 generation skipped: columns not recognised ({list(df.columns)})")
+        return None
+    df["v"] = pd.to_numeric(df[c["gen"]], errors="coerce")
+    pv = df.pivot_table(index=c["period"], columns=c["fid"], values="v", aggfunc="sum").sort_index()
+    if "ALL" not in pv.columns:
+        print("EIA-923 generation skipped: no ALL (all fuels) series to check the parts against")
+        return None
+    mapped = {k: v for k, v in OPS_MAP.items() if k in pv.columns}
+    gw = {}
+    for code, grp in mapped.items():
+        gw[grp] = gw.get(grp, 0) + pv[code].fillna(0)
+    part = sum(gw.values())
+    other = pv["ALL"] - part
+    neg = int((other < -0.01 * pv["ALL"].abs()).sum())
+    if neg:
+        print(f"EIA-923 generation skipped: the fuels listed add up to more than the all-fuels total in {neg} months (check fuel ids)")
+        meta["gen923_us"]["skipped"] = f"parts exceed ALL in {neg} months"
+        return None
+    gw["other"] = other
+    order = [k for k, _ in G.GROUPS if k in gw]
+    names = df.drop_duplicates(c["fid"]).set_index(c["fid"])[c["fname"]].to_dict() if c["fname"] else {}
+    meta["gen923_us"].update({"first_month": pv.index[0], "last_month": pv.index[-1], "fuel_ids_used": sorted(mapped), "fuel_names": {k: names.get(k) for k in pv.columns},
+                              "other_is": "all-fuels total minus the fuels listed (oil, biomass, geothermal, waste and any other)"})
+    return {
+        "months": pv.index.tolist(), "unit": "GWh (thousand MWh), net generation, all sectors, 50 states and DC",
+        "gwh": {k: _ints(gw[k].to_numpy(), 1) for k in order}, "total_gwh": _ints(pv["ALL"].to_numpy(), 1),
+        "fuel_ids": {k: [i for i, g in mapped.items() if g == k] for k in order if k != "other"},
+    }
+
+
 def build_retail(meta: dict) -> None:
     """EIA retail electricity sales, U.S. total, by sector (monthly, million kWh = GWh). Optional."""
     if not (CACHE / "retail_us.csv.gz").exists():
@@ -506,11 +670,13 @@ def main() -> int:
     states = build_plants(meta, "pjm")
     build_demand(meta, "pjm")
     build_fuel(meta, "pjm")
+    build_explorer(meta, "pjm")
     has_us = (CACHE / "generators_us_latest.csv.gz").exists() and (CACHE / "demand_us_hourly.csv.gz").exists()
     if has_us:
         build_plants(meta, "us")
         build_demand(meta, "us")
         build_fuel(meta, "us")
+        build_explorer(meta, "us")
         build_retail(meta)
     else:
         print("U.S. pulls not in the cache; building PJM files only. Run fetch_eia again to add the U.S. tabs.")

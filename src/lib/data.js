@@ -59,3 +59,15 @@ export function loadUS() {
   })();
   return usCache;
 }
+
+// ---- explorer: every interval of demand and generation. Small summary file per place, hourly files per UTC year on demand.
+const exCache = {}, hrCache = {};
+export function loadExplorer(scope) {
+  exCache[scope] ??= get(`explorer_${scope}.json`, true);
+  return exCache[scope];
+}
+export function loadHourly(scope, year) {
+  const k = `${scope}_${year}`;
+  hrCache[k] ??= get(`hourly_${scope}_${year}.json`, true);
+  return hrCache[k];
+}
