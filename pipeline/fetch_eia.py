@@ -200,6 +200,9 @@ def pull_retired(prov: dict) -> None:
                 with open(path, "wb") as f:
                     for chunk in r.iter_content(1 << 20):
                         f.write(chunk)
+        head = path.read_bytes()[:8]
+        if not (head.startswith(b"PK") or head.startswith(b"\xd0\xcf\x11\xe0")):
+            raise RuntimeError(f"{path.name} is not an Excel file (starts with {head[:40]!r}); EIA probably refused the scripted download")
         sha = hashlib.sha256(path.read_bytes()).hexdigest()
         sheets = pd.read_excel(path, sheet_name=None, header=None, dtype=str)
         name = next((k for k in sheets if "retired" in k.lower()), None)
