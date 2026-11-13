@@ -1,45 +1,45 @@
 {
-  "retrieved_at_utc": "2026-11-12T01:54:53+00:00",
+  "retrieved_at_utc": "2026-11-12T23:57:33+00:00",
   "routes": {
     "demand": {
       "route": "electricity/rto/region-data",
       "startPeriod": "2019-01-01T00",
-      "endPeriod": "2026-11-12T08",
+      "endPeriod": "2026-11-13T08",
       "facets": [
         "respondent",
         "type"
       ],
-      "rows": 68927
+      "rows": 68951
     },
     "subba": {
       "route": "electricity/rto/region-sub-ba-data",
       "startPeriod": "2019-01-01T00",
-      "endPeriod": "2026-11-11T08",
+      "endPeriod": "2026-11-12T08",
       "facets": [
         "subba",
         "parent"
       ],
-      "rows": 1371860
+      "rows": 1372340
     },
     "fuel": {
       "route": "electricity/rto/fuel-type-data",
       "startPeriod": "2019-01-01T00",
-      "endPeriod": "2026-11-11T07",
+      "endPeriod": "2026-11-12T07",
       "facets": [
         "respondent",
         "fueltype"
       ],
-      "rows": 551223
+      "rows": 551415
     },
     "demand_us": {
       "route": "electricity/rto/region-data",
       "respondent": "US48",
-      "rows": 68928
+      "rows": 68953
     },
     "fuel_us": {
       "route": "electricity/rto/fuel-type-data",
       "respondent": "US48",
-      "rows": 681183
+      "rows": 681567
     }
   },
   "generators_meta": {
@@ -148,51 +148,51 @@
       "WND"
     ],
     "fuel_ids_listed_by_route": {
-      "ALL": "all fuels",
-      "SPV": "solar photovoltaic",
-      "LIG": "lignite coal",
       "RC": "refined coal",
+      "SPV": "solar photovoltaic",
+      "ALL": "all fuels",
+      "LIG": "lignite coal",
       "WAS": "renewable waste products",
       "BIT": "bituminous coal",
       "STH": "solar thermal",
+      "OTH": "other",
+      "PET": "petroleum",
       "REN": "renewable",
+      "HPS": "hydro-electric pumped storage",
+      "OB2": "biomass",
       "TPV": "estimated total solar photovoltaic",
       "TSN": "estimated total solar",
       "COW": "all coal products",
-      "HPS": "hydro-electric pumped storage",
-      "OB2": "biomass",
-      "PET": "petroleum",
-      "OTH": "other",
+      "ORW": "other renewables",
+      "WND": "wind",
+      "WNT": "onshore wind turbine",
       "LFG": "landfill gas",
       "MLG": "municiapl landfill gas",
-      "NUC": "nuclear",
-      "ORW": "other renewables",
-      "WNS": "offshore wind turbine",
-      "WNT": "onshore wind turbine",
-      "WND": "wind",
-      "ANT": "anthracite coal",
       "DPV": "estimated small scale solar photovoltaic",
+      "NUC": "nuclear",
+      "WNS": "offshore wind turbine",
+      "ANT": "anthracite coal",
       "SUB": "subbituminous coal",
       "BIO": "biomass",
       "PC": "petroleum coke",
       "WOC": "waste coal",
-      "RFO": "residual fuel oil",
+      "PEL": "petroleum liquids",
       "SUN": "solar",
       "NGO": "natural gas & other gases",
-      "PEL": "petroleum liquids",
+      "RFO": "residual fuel oil",
       "OOG": "other gases",
       "GEO": "geothermal",
       "AOR": "all renewables",
-      "BIS": "bituminous coal and synthetic coal",
       "HYC": "conventional hydroelectric",
-      "MSB": "biogenic municipal solid waste",
-      "WOO": "waste oil and other oils",
       "WWW": "wood and wood wastes",
+      "MSB": "biogenic municipal solid waste",
+      "BIS": "bituminous coal and synthetic coal",
+      "WOO": "waste oil and other oils",
       "FOS": "fossil fuels",
-      "COL": "coal, excluding waste coal",
-      "DFO": "distillate fuel oil",
       "NG": "natural gas",
-      "OBW": "biomass"
+      "OBW": "biomass",
+      "DFO": "distillate fuel oil",
+      "COL": "coal, excluding waste coal"
     },
     "first_month": "2015-01",
     "last_month": "2026-08",
@@ -222,8 +222,8 @@
   },
   "plants": {
     "snapshot_period": "2026-08",
-    "units": 4059,
-    "units_without_coordinates_excluded": 4,
+    "units": 4061,
+    "units_without_coordinates_excluded": 0,
     "status_counts": [
       {
         "status": "OA",
@@ -235,7 +235,7 @@
         "status": "OP",
         "statusdesc": "Operating",
         "state_cls": "operating",
-        "n": 3815
+        "n": 3817
       },
       {
         "status": "OS",
@@ -267,12 +267,12 @@
     ],
     "baseline_units": 3654,
     "latest_units": 4061,
-    "removed_since_baseline": 274
+    "removed_since_baseline": 272
   },
   "demand": {
-    "hourly_rows": 68927,
+    "hourly_rows": 99664,
     "non_positive_rows_dropped": 0,
-    "months": 96,
+    "months": 137,
     "min_coverage": 0.95,
     "outlier_rule": {
       "series": {
@@ -285,9 +285,15 @@
       },
       "window": "centered 7 days, same series"
     },
-    "outlier_hours_dropped": 20,
-    "outlier_hours_dropped_pjm": 15,
+    "outlier_hours_dropped": 21,
+    "outlier_hours_dropped_pjm": 16,
     "outlier_hours": [
+      {
+        "series": "PJM",
+        "hour_et": "2016-02-26 09:00",
+        "value_mw": 137033.0,
+        "week_median_mw": 90977.5
+      },
       {
         "series": "PJM",
         "hour_et": "2019-12-11 15:00",
@@ -409,7 +415,7 @@
         "week_median_mw": 148.0
       }
     ],
-    "first_month": "2018-12",
+    "first_month": "2015-07",
     "last_month": "2026-11",
     "zones": [
       "AE",
@@ -434,25 +440,24 @@
       "RECO"
     ],
     "daily_min_hours": 20,
-    "days_in_daily_series": 2866,
+    "days_in_daily_series": 4147,
     "partial_months": [
-      "2018-12",
       "2026-11"
     ]
   },
   "fuel": {
     "min_coverage": 0.95,
-    "hourly_rows": 550287,
+    "hourly_rows": 569596,
     "codes_unmapped": [],
     "code_names": {
       "COL": "Coal",
-      "NG": "Natural Gas",
+      "NG": "Natural gas",
       "NUC": "Nuclear",
-      "OIL": "Petroleum",
       "OTH": "Other",
       "SUN": "Solar",
       "WAT": "Hydro",
-      "WND": "Wind"
+      "WND": "Wind",
+      "OIL": "Petroleum"
     },
     "code_groups": {
       "COL": "coal",
@@ -464,12 +469,16 @@
       "WAT": "hydro",
       "WND": "wind"
     },
-    "first_month": "2018-12",
+    "first_month": "2018-07",
     "last_month": "2026-11"
   },
   "explorer": {
     "pjm": {
       "hourly_files": [
+        "hourly_pjm_2015.json",
+        "hourly_pjm_2016.json",
+        "hourly_pjm_2017.json",
+        "hourly_pjm_2018.json",
         "hourly_pjm_2019.json",
         "hourly_pjm_2020.json",
         "hourly_pjm_2021.json",
@@ -479,11 +488,11 @@
         "hourly_pjm_2025.json",
         "hourly_pjm_2026.json"
       ],
-      "days": 2873,
-      "months": 96,
-      "first_hour_utc": "2019-01-01T00",
-      "last_hour_utc": "2026-11-11T23",
-      "gen_first_hour_utc": "2019-01-01T00",
+      "days": 4153,
+      "months": 137,
+      "first_hour_utc": "2015-07-01T05",
+      "last_hour_utc": "2026-11-12T23",
+      "gen_first_hour_utc": "2018-07-01T05",
       "groups": [
         "gas",
         "coal",
@@ -496,20 +505,24 @@
       "gen_guard": "hourly value dropped when above 5 times that fuel code's 99.9th percentile of absolute values",
       "gen_hours_dropped": 0,
       "gen_hours_dropped_examples": [],
-      "demand_hours_present": 68796,
+      "demand_hours_present": 99532,
       "gen_group_hours_present": {
-        "gas": 68788,
-        "coal": 68783,
-        "nuclear": 68783,
-        "solar": 68781,
-        "wind": 68788,
-        "hydro": 68788,
-        "other": 68788
+        "gas": 71543,
+        "coal": 71538,
+        "nuclear": 71538,
+        "solar": 71536,
+        "wind": 71543,
+        "hydro": 71543,
+        "other": 71543
       },
       "has_923": false
     },
     "us": {
       "hourly_files": [
+        "hourly_us_2015.json",
+        "hourly_us_2016.json",
+        "hourly_us_2017.json",
+        "hourly_us_2018.json",
         "hourly_us_2019.json",
         "hourly_us_2020.json",
         "hourly_us_2021.json",
@@ -519,11 +532,11 @@
         "hourly_us_2025.json",
         "hourly_us_2026.json"
       ],
-      "days": 2873,
-      "months": 96,
-      "first_hour_utc": "2019-01-01T00",
-      "last_hour_utc": "2026-11-11T23",
-      "gen_first_hour_utc": "2019-01-01T00",
+      "days": 4153,
+      "months": 137,
+      "first_hour_utc": "2015-07-01T08",
+      "last_hour_utc": "2026-11-13T00",
+      "gen_first_hour_utc": "2018-07-01T05",
       "groups": [
         "gas",
         "coal",
@@ -548,16 +561,16 @@
           "value_mw": 36426.0
         }
       ],
-      "demand_hours_present": 68928,
+      "demand_hours_present": 99665,
       "gen_group_hours_present": {
-        "gas": 68909,
-        "coal": 68909,
-        "nuclear": 68909,
-        "solar": 68909,
-        "wind": 68909,
-        "hydro": 68909,
-        "storage": 17805,
-        "other": 68909
+        "gas": 73344,
+        "coal": 73344,
+        "nuclear": 73344,
+        "solar": 73344,
+        "wind": 73344,
+        "hydro": 73344,
+        "storage": 17829,
+        "other": 73344
       },
       "has_923": true
     }
@@ -566,13 +579,12 @@
     "SB": "Standby/Backup: available for service but not normally used",
     "OP": "Operating",
     "OS": "Out of service and NOT expected to return to service in next calendar year",
-    "OA": "Out of service but expected to return to service in next calendar year",
-    "": ""
+    "OA": "Out of service but expected to return to service in next calendar year"
   },
   "plants_us": {
     "snapshot_period": "2026-08",
-    "units": 28390,
-    "units_without_coordinates_excluded": 36,
+    "units": 28408,
+    "units_without_coordinates_excluded": 0,
     "status_counts": [
       {
         "status": "OA",
@@ -584,13 +596,13 @@
         "status": "OP",
         "statusdesc": "Operating",
         "state_cls": "operating",
-        "n": 26141
+        "n": 26157
       },
       {
         "status": "OS",
         "statusdesc": "Out of service and NOT expected to return to service in next calendar year",
         "state_cls": "operating",
-        "n": 536
+        "n": 538
       },
       {
         "status": "SB",
@@ -625,14 +637,14 @@
       "WH",
       "WO"
     ],
-    "baseline_units": 25318,
-    "latest_units": 28396,
-    "removed_since_baseline": 1277
+    "baseline_units": 25321,
+    "latest_units": 28408,
+    "removed_since_baseline": 1264
   },
   "demand_us": {
-    "hourly_rows": 68928,
+    "hourly_rows": 99665,
     "non_positive_rows_dropped": 0,
-    "months": 96,
+    "months": 137,
     "min_coverage": 0.95,
     "outlier_rule": {
       "series": {
@@ -648,29 +660,28 @@
     "outlier_hours_dropped": 0,
     "outlier_hours_dropped_pjm": 0,
     "outlier_hours": [],
-    "first_month": "2018-12",
+    "first_month": "2015-07",
     "last_month": "2026-11",
     "zones": [],
     "daily_min_hours": 20,
-    "days_in_daily_series": 2871,
+    "days_in_daily_series": 4153,
     "partial_months": [
-      "2018-12",
       "2026-11"
     ]
   },
   "fuel_us": {
     "min_coverage": 0.95,
-    "hourly_rows": 681183,
+    "hourly_rows": 712444,
     "codes_unmapped": [],
     "code_names": {
       "COL": "Coal",
-      "NG": "Natural Gas",
+      "NG": "Natural gas",
       "NUC": "Nuclear",
-      "OIL": "Petroleum",
       "OTH": "Other",
       "SUN": "Solar",
       "WAT": "Hydro",
       "WND": "Wind",
+      "OIL": "Petroleum",
       "UNK": "Unknown",
       "BAT": "Battery storage",
       "OES": "Other energy storage",
@@ -698,10 +709,161 @@
       "WNB": "wind",
       "WND": "wind"
     },
-    "first_month": "2018-12",
+    "first_month": "2018-07",
     "last_month": "2026-11"
   },
-  "built_at_utc": "2026-11-12T01:57:26+00:00",
+  "bulk930": {
+    "files": [
+      "EIA930_BALANCE_2015_Jul_Dec",
+      "EIA930_BALANCE_2016_Jan_Jun",
+      "EIA930_BALANCE_2016_Jul_Dec",
+      "EIA930_BALANCE_2017_Jan_Jun",
+      "EIA930_BALANCE_2017_Jul_Dec",
+      "EIA930_BALANCE_2018_Jan_Jun",
+      "EIA930_BALANCE_2018_Jul_Dec",
+      "EIA930_BALANCE_2019_Jan_Jun"
+    ],
+    "offset_hours": 0,
+    "alignment": {
+      "-1": 0.0009210223347916187,
+      "0": 1.0,
+      "1": 0.0009210223347916187
+    },
+    "columns_used": {
+      "2015_Jul_Dec": {
+        "ba": "Balancing Authority",
+        "utc": "UTC Time at End of Hour",
+        "demand": "Demand (MW) (Adjusted)",
+        "gen": {
+          "UNK": [
+            "Net Generation (MW) from Unknown Fuel Sources (Adjusted)"
+          ]
+        }
+      },
+      "2016_Jan_Jun": {
+        "ba": "Balancing Authority",
+        "utc": "UTC Time at End of Hour",
+        "demand": "Demand (MW) (Adjusted)",
+        "gen": {
+          "UNK": [
+            "Net Generation (MW) from Unknown Fuel Sources (Adjusted)"
+          ]
+        }
+      },
+      "2016_Jul_Dec": {
+        "ba": "Balancing Authority",
+        "utc": "UTC Time at End of Hour",
+        "demand": "Demand (MW) (Adjusted)",
+        "gen": {
+          "UNK": [
+            "Net Generation (MW) from Unknown Fuel Sources (Adjusted)"
+          ]
+        }
+      },
+      "2017_Jan_Jun": {
+        "ba": "Balancing Authority",
+        "utc": "UTC Time at End of Hour",
+        "demand": "Demand (MW) (Adjusted)",
+        "gen": {
+          "UNK": [
+            "Net Generation (MW) from Unknown Fuel Sources (Adjusted)"
+          ]
+        }
+      },
+      "2017_Jul_Dec": {
+        "ba": "Balancing Authority",
+        "utc": "UTC Time at End of Hour",
+        "demand": "Demand (MW) (Adjusted)",
+        "gen": {
+          "UNK": [
+            "Net Generation (MW) from Unknown Fuel Sources (Adjusted)"
+          ]
+        }
+      },
+      "2018_Jan_Jun": {
+        "ba": "Balancing Authority",
+        "utc": "UTC Time at End of Hour",
+        "demand": "Demand (MW) (Adjusted)",
+        "gen": {
+          "UNK": [
+            "Net Generation (MW) from Unknown Fuel Sources (Adjusted)"
+          ]
+        }
+      },
+      "2018_Jul_Dec": {
+        "ba": "Balancing Authority",
+        "utc": "UTC Time at End of Hour",
+        "demand": "Demand (MW) (Adjusted)",
+        "gen": {
+          "COL": [
+            "Net Generation (MW) from Coal (Adjusted)"
+          ],
+          "NG": [
+            "Net Generation (MW) from Natural Gas (Adjusted)"
+          ],
+          "NUC": [
+            "Net Generation (MW) from Nuclear (Adjusted)"
+          ],
+          "WAT": [
+            "Net Generation (MW) from Hydropower and Pumped Storage (Adjusted)"
+          ],
+          "SUN": [
+            "Net Generation (MW) from Solar (Adjusted)"
+          ],
+          "WND": [
+            "Net Generation (MW) from Wind (Adjusted)"
+          ],
+          "OTH": [
+            "Net Generation (MW) from Other Fuel Sources (Adjusted)"
+          ],
+          "UNK": [
+            "Net Generation (MW) from Unknown Fuel Sources (Adjusted)"
+          ]
+        }
+      },
+      "2019_Jan_Jun": {
+        "ba": "Balancing Authority",
+        "utc": "UTC Time at End of Hour",
+        "demand": "Demand (MW) (Adjusted)",
+        "gen": {
+          "COL": [
+            "Net Generation (MW) from Coal (Adjusted)"
+          ],
+          "NG": [
+            "Net Generation (MW) from Natural Gas (Adjusted)"
+          ],
+          "NUC": [
+            "Net Generation (MW) from Nuclear (Adjusted)"
+          ],
+          "WAT": [
+            "Net Generation (MW) from Hydropower and Pumped Storage (Adjusted)"
+          ],
+          "SUN": [
+            "Net Generation (MW) from Solar (Adjusted)"
+          ],
+          "WND": [
+            "Net Generation (MW) from Wind (Adjusted)"
+          ],
+          "OTH": [
+            "Net Generation (MW) from Other Fuel Sources (Adjusted)"
+          ],
+          "UNK": [
+            "Net Generation (MW) from Unknown Fuel Sources (Adjusted)"
+          ]
+        }
+      }
+    },
+    "us": "sum of balancing authorities, hours with >=90% of usual reporters",
+    "us_overlap_ratio_median": 1.0,
+    "written_at_utc": "2026-11-13T01:44:15+00:00",
+    "files_present": [
+      "bulk930_demand_hourly.csv.gz",
+      "bulk930_demand_us_hourly.csv.gz",
+      "bulk930_fuel_hourly.csv.gz",
+      "bulk930_fuel_us_hourly.csv.gz"
+    ]
+  },
+  "built_at_utc": "2026-11-13T01:44:26+00:00",
   "window_start": "2022-11-30",
   "baseline_window": [
     "2021-11",
