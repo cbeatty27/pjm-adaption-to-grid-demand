@@ -27,8 +27,9 @@ export function loadAll() {
       get('meta.json'), get('plants.json'), get('demand.json'), get('fuelmix.json'), get('datacenters.json'),
     ]);
     const retRaw = meta.retired?.rows_kept != null ? await get('retired.json', true) : null;
+    const capgen = meta.capgen?.pjm ? await get('capgen_pjm.json', true) : null;
     return {
-      meta, demand, fuel,
+      meta, demand, fuel, capgen,
       retired: retRaw ? unpack(retRaw) : null, // every retired unit; `pjm` marks plants in the PJM snapshots
       units: unpack({ columns: plantsRaw.columns, rows: plantsRaw.units }),
       removed: removedSummary(plantsRaw.removed_since_baseline, meta.groups),
@@ -46,11 +47,12 @@ export function loadUS() {
   usCache ??= (async () => {
     const { meta } = await loadAll();
     if (!meta.has_us) return null;
-    const [plantsRaw, demand, fuel, retail] = await Promise.all([
+    const [plantsRaw, demand, fuel, retail, capgen] = await Promise.all([
       get('plants_us.json'), get('demand_us.json'), get('fuelmix_us.json'), get('retail_us.json', true),
+      meta.capgen?.us ? get('capgen_us.json', true) : null,
     ]);
     return {
-      demand, fuel, retail,
+      demand, fuel, retail, capgen,
       units: unpack({ columns: plantsRaw.columns, rows: plantsRaw.units }),
       removed: removedSummary(plantsRaw.removed_since_baseline, meta.groups),
       removedBaseline: plantsRaw.removed_since_baseline.baseline_period,

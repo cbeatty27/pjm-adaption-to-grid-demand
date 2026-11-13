@@ -624,3 +624,106 @@ export function capacityGenFigure(host, { meta, fuel, winUnits, retired, scope, 
     foot: `Sources: capacity from EIA's generator inventory (EIA-860M, ${esc(basis)}) and, for retirements, its Retired tab; energy from EIA-930 net generation by fuel. The ceiling assumes a unit runs every hour of a year; units that started partway through the window could make less, and it is only a bound, not an estimate of what any unit produced.`,
   });
 }
+
+
+// ---- capacity factor and what added capacity produced ---------------------------------------------------------
+const pc = (v, d = 1) => (v == null ? 'n/a' : `${(100 * v).toFixed(d)}%`);
+const monthHours = (ym) => new Date(Number(ym.slice(0, 4)), Number(ym.slice(5, 7)), 0).getDate() * 24;
+
+export function yieldFigure(host, { meta, cg, scope }) {
+  if (!cg?.months?.length) return null;
+  const label = Object.fromEntries(meta.groups.map((g) => [g.key, g.label]));
+  const fuels = cg.groups.filter((g) => cg.cf[g].some((v) => v != null));
+  const months = cg.months, hrs = months.map(monthHours);
+  // rolling 12 months: energy produced / energy the capacity could have produced running every hour
+  const roll = (g) => months.map((_, i) => {
+    if (i < 11) return null;
+    let e = 0, c = 0;
+    for (let k = i - 11; k <= i; k++) {
+      const gv = cg.gen_avg_mw[g][k];
+      if (gv == null || !(cg.cap_mw[g][k] > 0)) return null;
+      e += gv * hrs[k]; c += cg.cap_mw[g][k] * hrs[k];
+    }
+    return e / c;
+  });
+  const latest = cg.windows[cg.windows.length - 1], base = cg.baseline;
+  const st = cg.steps?.baseline_to_latest || {};
+  const rel = months.indexOf('2022-11');
+  const lineDs = (series) => fuels.map((g) => ({ label: label[g], data: series(g), borderColor: FUEL_COLOR[g], backgroundColor: FUEL_COLOR[g], borderWidth: 2.2, pointRadius: 0, pointHoverRadius: 4, tension: 0, spanGaps: false }));
+  const lineOpts = (title) => ({
+    maintainAspectRatio: false, interaction: { mode: 'index', intersect: false },
+    scales: { x: { grid: { display: false }, ticks: yearTicks(months) }, y: { min: 0, max: 1, title: { display: true, text: title }, grid: { color: GRID }, ticks: { callback: (v) => `${Math.round(v * 100)}%` } } },
+    plugins: { legend: { display: false }, tooltip: { itemSort: (a, b) => b.parsed.y - a.parsed.y, callbacks: { title: (it) => ymLabel(months[it[0].dataIndex]), label: (c) => `${c.dataset.label}: ${pc(c.parsed.y)}` } } },
+  });
+  const legend = `<div class="legend__row">${fuels.map((g) => `<span><i style="background:${FUEL_COLOR[g]}"></i>${esc(label[g])}</span>`).join('')}</div>`;
+
+  const views = [
+    { id: 'roll', label: 'Rolling 12 months', legend, note: 'For each month, the energy produced over the 12 months ending then, divided by what that fuel\'s capacity in service could have produced running every hour of those 12 months. 100% would mean every unit ran flat out all year.',
+      draw: (cv) => new Chart(cv, { type: 'line', data: { labels: months, datasets: lineDs(roll) }, options: lineOpts('Capacity factor, 12 months'), plugins: [releaseMarker(months, '2022-11', 'bottom')] }) },
+    { id: 'month', label: 'Every month', legend, note: 'The same ratio for each single month. Solar and wind swing with the seasons, so read the rolling view for the trend.',
+      draw: (cv) => new Chart(cv, { type: 'line', data: { labels: months, datasets: lineDs((g) => cg.cf[g]) }, options: lineOpts('Capacity factor, month'), plugins: [releaseMarker(months, '2022-11', 'bottom')] }) },
+  ];
+
+  // what the added capacity went with
+  const grow = fuels.filter((g) => st[g] && st[g].implied_cf != null);
+  if (base && latest && grow.length) {
+    const bars = grow.map((g) => ({ g, a: base.groups[g]?.cf, b: latest.groups[g]?.cf, c: st[g].implied_cf }));
+    views.push({
+      id: 'added', label: 'Added capacity', height: Math.max(220, 120 * bars.length + 80),
+      legend: `<div class="legend__row"><span><i style="background:${TIME.cool}"></i>All capacity, 12 months to ${esc(ymLabel(base.to))}</span><span><i style="background:${TIME.warm}"></i>All capacity, 12 months to ${esc(ymLabel(latest.to))}</span><span><i style="background:#15323d"></i>Only the capacity added in between</span></div>`,
+      note: `For fuels whose capacity grew by at least 10%: the capacity factor over all capacity in each window, and the capacity factor of the <b>added</b> capacity alone, which is the change in average energy produced (MW) divided by the change in average capacity (MW) between the two windows. It counts every unit, new and old, so it is arithmetic on EIA's totals, not a measurement of any new unit.`,
+      draw: (cv) => new Chart(cv, {
+        type: 'bar',
+        data: { labels: bars.map((b) => label[b.g]), datasets: [
+          { label: 'Earlier window', data: bars.map((b) => b.a), backgroundColor: TIME.cool, borderRadius: 4, barPercentage: 0.9 },
+          { label: 'Latest window', data: bars.map((b) => b.b), backgroundColor: TIME.warm, borderRadius: 4, barPercentage: 0.9 },
+          { label: 'Added capacity', data: bars.map((b) => b.c), backgroundColor: '#15323d', borderRadius: 4, barPercentage: 0.9 }] },
+        options: { indexAxis: 'y', maintainAspectRatio: false, layout: { padding: { right: 70 } },
+          scales: { x: { min: 0, max: 1, grid: { color: GRID }, ticks: { callback: (v) => `${Math.round(v * 100)}%` }, title: { display: true, text: 'Capacity factor' } }, y: { grid: { display: false } } },
+          plugins: { legend: { display: false }, tooltip: { callbacks: { label: (c) => `${c.dataset.label}: ${pc(c.parsed.x)}` } } } },
+        plugins: [barEndLabels((i, v) => pc(v))],
+      }),
+    });
+  }
+
+  // each 12-month window as a point: capacity against energy
+  const fit = fuels.filter((g) => cg.corr?.[g]?.measurable);
+  if (fit.length) {
+    const gw = (v) => v / 1000;
+    const ds = [];
+    fit.forEach((g) => {
+      const pts = cg.windows.filter((w) => w.groups[g]).map((w) => ({ x: gw(w.groups[g].cap_mw), y: gw(w.groups[g].gen_mw), to: w.to }));
+      ds.push({ label: label[g], data: pts, backgroundColor: FUEL_COLOR[g], borderColor: FUEL_COLOR[g], pointRadius: 5, pointHoverRadius: 7 });
+      const c = cg.corr[g], xs = pts.map((p) => p.x), lo = Math.min(...xs), hi = Math.max(...xs);
+      ds.push({ label: `${label[g]} fit`, type: 'line', data: [{ x: lo, y: gw(c.slope * lo * 1000 + c.intercept_mw) }, { x: hi, y: gw(c.slope * hi * 1000 + c.intercept_mw) }], borderColor: FUEL_COLOR[g], borderWidth: 1.5, borderDash: [5, 4], pointRadius: 0 });
+    });
+    views.push({
+      id: 'scatter', label: 'Each 12 months', height: 380,
+      legend: `<div class="legend__row">${fit.map((g) => `<span><i style="background:${FUEL_COLOR[g]}"></i>${esc(label[g])}</span>`).join('')}</div>`,
+      note: `Each dot is one 12-month window (Nov to Oct blocks counted back from the latest data): average capacity in service on the x axis, average power produced on the y axis, both in GW. ${fit.map((g) => { const c = cg.corr[g]; return `<b>${esc(label[g])}</b>: r = ${c.r.toFixed(3)}, so ${nf0.format(100 * c.r2)}% of the year-to-year variation in average output lines up with capacity; each extra GW went with ${nf0.format(1000 * c.slope)} MW more average output (n = ${c.n} windows).`; }).join(' ')} Only fuels whose capacity moved by at least 10% are fitted; for fuels with steady capacity the line would only show weather and demand.`,
+      draw: (cv) => new Chart(cv, { type: 'scatter', data: { datasets: ds }, options: { maintainAspectRatio: false,
+        scales: { x: { title: { display: true, text: 'Average capacity in service (GW)' }, grid: { color: GRID }, ticks: { callback: (v) => nf0.format(v) } }, y: { title: { display: true, text: 'Average power produced (GW)' }, grid: { color: GRID }, ticks: { callback: (v) => nf0.format(v) } } },
+        plugins: { legend: { display: false }, tooltip: { filter: (it) => !String(it.dataset.label).endsWith('fit'), callbacks: { title: (it) => `12 months to ${ymLabel(it[0].raw.to)}`, label: (c) => `${c.dataset.label}: ${nf1.format(c.raw.x)} GW capacity, ${nf1.format(c.raw.y)} GW produced (${pc(c.raw.y / c.raw.x)})` } } } } }),
+    });
+  }
+
+  // table: every window, every fuel
+  const rows = [];
+  fuels.forEach((g) => cg.windows.forEach((w) => { const v = w.groups[g]; if (v) rows.push([label[g], `${ymLabel(w.from)} to ${ymLabel(w.to)}`, `${nf1.format(v.cap_mw / 1000)} GW`, `${nf1.format(v.twh)} TWh`, pc(v.cf)]); }));
+  views.push({ id: 'table', label: 'Table', note: 'Average capacity in service, energy produced and capacity factor for each 12-month window.', table: table(['Fuel', '12 months', 'Capacity in service', 'Energy produced', 'Capacity factor'], rows) });
+
+  // a plain-language lead: the fuels that grew, in numbers
+  const bit = grow.map((g) => {
+    const s = st[g], l = latest.groups[g];
+    return `<b>${esc(label[g])}</b>: ${nf1.format(s.d_cap_mw / 1000)} GW more capacity in service on average and ${nf1.format(s.d_twh)} TWh more energy in the latest 12 months than in the 12 before ChatGPT, which is a capacity factor of ${pc(s.implied_cf)} on the added capacity against ${pc(l.cf)} for all of it.`;
+  });
+  const callout = bit.length
+    ? `<b>How much of the added capacity shows up as energy.</b> Capacity factor is energy produced divided by what the capacity could make running every hour of the year. ${bit.join(' ')}`
+    : '<b>How much capacity shows up as energy.</b> Capacity factor is energy produced divided by what the capacity could make running every hour of the year.';
+  const sk = cg.caveats?.units_skipped || {};
+  return figure(host, {
+    title: `${scope}: how much of each fuel's capacity shows up as energy`,
+    callout, views,
+    foot: `Capacity: net summer capacity of the generators operating for the whole month, which is EIA's time-adjusted definition of capacity for capacity factors. It comes from EIA's monthly generator inventory (EIA-860M) through the API for units operating now, plus every unit on its Retired tab since 2015, each at its latest reported capacity, so uprates and derates are not tracked. Energy: ${esc(cg.method.generation)}. The inventory lists utility-scale generators of 1 MW or more, so small-scale solar is in neither the capacity nor the energy. ${scope === 'U.S.' ? `${nf0.format(sk.pumped_storage_excluded_from_us_hydro || 0)} pumped-storage units are left out of hydro capacity because EIA-923 hydro excludes pumped storage. ` : 'PJM hydro capacity includes pumped storage because EIA-930 reports hydro and pumped storage together. '}${sk.no_capacity ? `${nf0.format(sk.no_capacity)} units with no reported capacity are not counted. ` : ''}A capacity factor describes a fuel's total output relative to its total capacity; it does not say why units ran or did not run.`,
+  });
+}

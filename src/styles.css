@@ -241,3 +241,5 @@ main { flex: 1; min-height: 0; outline: none; }
 .xctl__note { margin: 4px 0 0; font-size: 12.5px; color: var(--ink-3); }
 .xctl__check { margin-left: auto; font-size: 13px; color: var(--ink-3); display: inline-flex; align-items: center; gap: 6px; }
 .xdl { display: flex; flex-wrap: wrap; gap: 10px; padding: 12px 24px 4px; }
+.legend__row { display: flex; flex-wrap: wrap; gap: 4px 16px; }
+.legend__row span { display: inline-flex; align-items: center; gap: 6px; }

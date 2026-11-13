@@ -86,6 +86,16 @@ def main() -> int:
                 errs.append(f"explorer {scope}: only {len(vals)} days of demand")
             elif not 1_000 < min(vals) and scope == "pjm":
                 errs.append(f"explorer {scope}: a daily demand value is implausibly low")
+    for scope, info in (meta.get("capgen") or {}).items():
+        f = OUT / f"capgen_{scope}.json"
+        if not f.exists():
+            errs.append(f"capgen_{scope}.json is listed in meta but missing")
+            continue
+        cg = json.loads(f.read_text())
+        for g in ("solar", "wind", "nuclear"):
+            cfs = [v for v in cg["cf"].get(g, []) if v is not None]
+            if cfs and not (0 < min(cfs) and max(cfs) < 1.3):
+                errs.append(f"capgen {scope}: {g} capacity factor outside 0-130% (min {min(cfs):.2f}, max {max(cfs):.2f}); capacity history is probably incomplete")
     if errs:
         print("VALIDATION FAILED:\n - " + "\n - ".join(errs))
         return 1

@@ -9,6 +9,7 @@ EIA's energy-source codes (see groups.py).
 """
 from __future__ import annotations
 
+import calendar
 import datetime as dt
 import json
 import os
@@ -632,6 +633,16 @@ def build_retired(meta: dict) -> None:
     kept["pjm"] = (kept["ba"] == "PJM") | (~ba_known & kept["plant"].isin(pjm_ids))
     pjm_by_ba, pjm_by_id = int((kept["ba"] == "PJM").sum()), int((~ba_known & kept["plant"].isin(pjm_ids)).sum())
 
+    # every retirement since January 2015 (not only those after the release), so capacity in service can be
+    # rebuilt month by month for the capacity-and-generation comparison; same PJM rule as above
+    hist = t[t["ret"].notna() & (t["ret"] >= "2015-01") & (t["ret"] <= latest_period)].copy()
+    h_known = hist["ba"].str.len() > 0
+    hist["pjm"] = (hist["ba"] == "PJM") | (~h_known & hist["plant"].isin(pjm_ids))
+    hcols = ["plant", "gen", "group", "src", "mw", "ret", "online", "pjm"]
+    hrows = [[None if (isinstance(x, float) and np.isnan(x)) else (bool(x) if isinstance(x, (np.bool_, bool)) else (round(float(x), 4) if isinstance(x, (float, np.floating)) else x)) for x in r]
+             for r in hist[hcols].itertuples(index=False)]
+    (OUT / "retired_history.json").write_text(json.dumps({"columns": hcols, "rows": hrows, "since": "2015-01", "capacity_basis": basis}, separators=(",", ":")))
+
     # coordinates: the tab's own when present, else the plant's coordinates in the baseline snapshot
     base_us = CACHE / "generators_us_baseline.csv.gz"
     bsrc = read("generators_us_baseline.csv.gz") if base_us.exists() else read("generators_baseline.csv.gz")
@@ -678,12 +689,220 @@ def build_retired(meta: dict) -> None:
         "retirement_months": [str(kept["ret"].min()), str(kept["ret"].max())] if len(kept) else [],
         "pjm_rule": "balancing authority code PJM on the Retired tab; where the code is blank, plant ID found in the PJM snapshots from the generator-inventory API route",
         "pjm_rows_by_ba_code": pjm_by_ba, "pjm_rows_by_plant_id": pjm_by_id,
+        "history_rows_since_2015": int(len(hist)), "history_missing_online_date": int(hist["online"].isna().sum()),
         "crosscheck": xc,
     })
 
 
+# ---------------------------------------------------------------------------------------------------------------
+# Capacity and generation: how much of each fuel's capacity shows up as energy
+# ---------------------------------------------------------------------------------------------------------------
+CAP_GROUPS = ["nuclear", "coal", "gas", "solar", "wind", "hydro"]
+CAP_MIN_COVERAGE = 0.95
+
+
+def _month_index(ym: str, y0: int, m0: int) -> int:
+    return (int(ym[:4]) - y0) * 12 + (int(ym[5:7]) - m0)
+
+
+def _month_list(first: str, n: int) -> list[str]:
+    return [shift_month(first, i) for i in range(n)]
+
+
+def _ols(x: list[float], y: list[float]) -> dict | None:
+    """Line through (capacity, generation) points. Reported as measurable only when capacity moved by at least 10% of its
+    mean across the points; otherwise the slope says nothing about capacity."""
+    if len(x) < 4 or np.ptp(x) == 0:
+        return None
+    xa, ya = np.array(x, float), np.array(y, float)
+    slope, icpt = np.polyfit(xa, ya, 1)
+    r = float(np.corrcoef(xa, ya)[0, 1])
+    rng = float(np.ptp(xa) / np.mean(xa))
+    return {"n": int(len(x)), "r": round(r, 4), "r2": round(r * r, 4), "slope": round(float(slope), 4), "intercept_mw": round(float(icpt), 1),
+            "capacity_range_share": round(rng, 4), "measurable": bool(rng >= 0.10 and len(x) >= 6)}
+
+
+def build_capgen(meta: dict, scope: str) -> None:
+    """Capacity in service each month (EIA-860M operating inventory plus every unit on the Retired tab since 2015)
+    against net generation by fuel (EIA-923 for the U.S., EIA-930 for PJM).
+
+    Capacity factor = average generation (MW) / capacity in service for the whole month (MW). Capacity is time-adjusted
+    as EIA does it: a generator counts in a month only if it was operating for the entire month. Nothing here says
+    why a ratio is what it is."""
+    us = scope == "us"
+    pf, rf, ef = OUT / ("plants_us.json" if us else "plants.json"), OUT / "retired_history.json", OUT / f"explorer_{scope}.json"
+    if not (pf.exists() and rf.exists() and ef.exists()):
+        print(f"capacity and generation ({scope}): needs {pf.name}, retired_history.json and {ef.name}; skipping")
+        return
+    pl, rh, ex = json.loads(pf.read_text()), json.loads(rf.read_text()), json.loads(ef.read_text())
+    uc = pl["columns"]
+    units = [dict(zip(uc, r)) for r in pl["units"]]
+    rc = rh["columns"]
+    retired = [dict(zip(rc, r)) for r in rh["rows"]]
+    if not us:
+        retired = [r for r in retired if r.get("pjm")]
+
+    # generation, as average MW in each month
+    gen: dict[str, dict[str, float]] = {g: {} for g in CAP_GROUPS}
+    if us:
+        m9 = ex.get("monthly_923")
+        if not m9:
+            print("capacity and generation (us): no EIA-923 monthly series; skipping")
+            return
+        for i, m in enumerate(m9["months"]):
+            h = calendar.monthrange(int(m[:4]), int(m[5:7]))[1] * 24
+            for g in CAP_GROUPS:
+                v = (m9["gwh"].get(g) or [None] * len(m9["months"]))[i]
+                if v is not None:
+                    gen[g][m] = v * 1000.0 / h
+        gen_src = "EIA-923 monthly net generation (electricity/electric-power-operational-data), all sectors, 50 states and DC"
+    else:
+        mm = ex["monthly"]
+        cov = mm["gen"].get("coverage", [])
+        for g in CAP_GROUPS:
+            vals = mm["gen"]["avg_mw"].get(g)
+            if not vals:
+                continue
+            for i, m in enumerate(mm["months"]):
+                if vals[i] is not None and i < len(cov) and cov[i] is not None and cov[i] >= CAP_MIN_COVERAGE:
+                    gen[g][m] = float(vals[i])
+        gen_src = "EIA-930 hourly net generation by fuel (electricity/rto/fuel-type-data), respondent PJM, months with at least 95% of hours"
+    all_m = sorted({m for g in gen.values() for m in g})
+    if not all_m:
+        print(f"capacity and generation ({scope}): no generation months; skipping")
+        return
+    first = max(all_m[0], "2015-01")
+    n = _month_index(all_m[-1], int(first[:4]), int(first[5:7])) + 1
+    months = _month_list(first, n)
+    y0, m0 = int(first[:4]), int(first[5:7])
+
+    # capacity in service for the whole month, by group (difference arrays)
+    diff = {g: np.zeros(n + 1) for g in CAP_GROUPS}
+    cnt = {g: np.zeros(n + 1) for g in CAP_GROUPS}
+    skipped = {"no_online_date": 0, "no_capacity": 0, "pumped_storage_excluded_from_us_hydro": 0}
+    basis_nameplate = 0
+
+    def add(g, on, ret, mw):
+        a = max(_month_index(on, y0, m0) + 1, 0)            # first month the unit is in service for the whole month
+        b = n if not ret else min(_month_index(ret, y0, m0), n)  # the unit is out of the retirement month on
+        if a < b:
+            diff[g][a] += mw; diff[g][b] -= mw
+            cnt[g][a] += 1; cnt[g][b] -= 1
+
+    for u in units:
+        g = u.get("group")
+        if g not in CAP_GROUPS:
+            continue
+        if us and g == "hydro" and u.get("pm") == "PS":
+            skipped["pumped_storage_excluded_from_us_hydro"] += 1
+            continue
+        on = u.get("online")
+        if not on:
+            skipped["no_online_date"] += 1
+            continue
+        mw = u.get("msum")
+        if mw is None or (isinstance(mw, float) and np.isnan(mw)):
+            mw = u.get("mw"); basis_nameplate += 1
+        if not mw:
+            skipped["no_capacity"] += 1
+            continue
+        add(g, on, None, float(mw))
+    for r in retired:
+        g = r.get("group")
+        if g not in CAP_GROUPS:
+            continue
+        if not r.get("online"):
+            skipped["no_online_date"] += 1
+            continue
+        if not r.get("mw"):
+            skipped["no_capacity"] += 1
+            continue
+        add(g, r["online"], r["ret"], float(r["mw"]))
+    cap = {g: np.cumsum(diff[g])[:n] for g in CAP_GROUPS}
+    units_n = {g: np.cumsum(cnt[g])[:n] for g in CAP_GROUPS}
+
+    out_cap, out_gen, out_cf = {}, {}, {}
+    for g in CAP_GROUPS:
+        out_cap[g] = [round(float(v), 1) for v in cap[g]]
+        out_gen[g] = [round(gen[g][m], 1) if m in gen[g] else None for m in months]
+        out_cf[g] = [round(gen[g][m] / cap[g][i], 4) if (m in gen[g] and cap[g][i] > 0) else None for i, m in enumerate(months)]
+
+    # 12-month windows ending in the latest month with data, stepping back a year at a time; plus the pre-release baseline
+    def window(lo: str, hi: str):
+        ix = [i for i, m in enumerate(months) if lo <= m <= hi]
+        if len(ix) != 12:
+            return None
+        res = {"from": lo, "to": hi, "hours": sum(calendar.monthrange(int(months[i][:4]), int(months[i][5:7]))[1] * 24 for i in ix), "groups": {}}
+        for g in CAP_GROUPS:
+            gv = [out_gen[g][i] for i in ix]
+            if any(v is None for v in gv) or any(cap[g][i] <= 0 for i in ix):
+                continue
+            hrs = [calendar.monthrange(int(months[i][:4]), int(months[i][5:7]))[1] * 24 for i in ix]
+            cap_mw = float(np.average([cap[g][i] for i in ix], weights=hrs))
+            gen_mw = float(np.average(gv, weights=hrs))
+            res["groups"][g] = {"cap_mw": round(cap_mw, 1), "gen_mw": round(gen_mw, 1), "twh": round(gen_mw * res["hours"] / 1e6, 3), "cf": round(gen_mw / cap_mw, 4)}
+        return res
+    last = months[-1]
+    wins = []
+    k = 0
+    while True:
+        hi, lo = shift_month(last, -12 * k), shift_month(last, -12 * k - 11)
+        if lo < first:
+            break
+        w = window(lo, hi)
+        if w and w["groups"]:
+            wins.append(w)
+        k += 1
+    wins.sort(key=lambda w: w["to"])
+    base = window(*BASE_WINDOW)
+
+    def step(a, b):
+        out = {}
+        for g in CAP_GROUPS:
+            if g in a["groups"] and g in b["groups"]:
+                da, dg = b["groups"][g]["cap_mw"] - a["groups"][g]["cap_mw"], b["groups"][g]["gen_mw"] - a["groups"][g]["gen_mw"]
+                out[g] = {"d_cap_mw": round(da, 1), "d_gen_mw": round(dg, 1), "d_twh": round(b["groups"][g]["twh"] - a["groups"][g]["twh"], 3),
+                          "cap_before_mw": a["groups"][g]["cap_mw"],
+                          "implied_cf": round(dg / da, 4) if da > 0 and da >= 0.10 * a["groups"][g]["cap_mw"] else None}
+        return out
+    latest = wins[-1] if wins else None
+    steps = {"baseline_to_latest": step(base, latest) if base and latest else {}, "first_to_latest": step(wins[0], latest) if len(wins) > 1 else {}}
+    corr = {}
+    for g in CAP_GROUPS:
+        pts = [(w["groups"][g]["cap_mw"], w["groups"][g]["gen_mw"]) for w in wins if g in w["groups"]]
+        corr[g] = _ols([p[0] for p in pts], [p[1] for p in pts]) if pts else None
+    payload = {
+        "scope": scope, "months": months, "groups": CAP_GROUPS, "cap_mw": out_cap, "gen_avg_mw": out_gen, "cf": out_cf,
+        "units_in_service": {g: [int(v) for v in units_n[g]] for g in CAP_GROUPS},
+        "windows": wins, "baseline": base, "steps": steps, "corr": corr,
+        "method": {
+            "capacity": "net summer capacity of generators operating for the entire month (EIA's time-adjusted definition); operating unit in EIA-860M Operating tab via the API, plus every unit on the EIA-860M Retired tab that retired since 2015-01",
+            "generation": gen_src, "capacity_factor": "average generation in the month (MW) divided by that capacity (MW)",
+            "windows": "12 months ending in the latest month with generation data, stepping back a year at a time",
+            "corr": "least-squares line through one point per window: x = average capacity in service, y = average generation (MW); slope = MW of generation per MW of capacity",
+        },
+        "caveats": {"units_skipped": skipped, "units_using_nameplate_for_missing_summer": basis_nameplate,
+                    "capacity_as_reported_now": "each unit's capacity is its latest reported value applied to every month it was in service; uprates, derates and re-ratings are not tracked"},
+    }
+    (OUT / f"capgen_{scope}.json").write_text(json.dumps(payload, separators=(",", ":")))
+    meta.setdefault("capgen", {})[scope] = {"first_month": months[0], "last_month": months[-1], "windows": len(wins), **{k2: v for k2, v in payload["caveats"].items() if k2 == "units_skipped"}}
+
+
 def main() -> int:
     OUT.mkdir(parents=True, exist_ok=True)
+    if "--retired-only" in sys.argv:
+        # Refresh only retired.json and retired_history.json from the cached Retired tab, leaving every other file as it is.
+        prev = json.loads((OUT / "meta.json").read_text())
+        meta = json.loads((CACHE / "provenance_eia.json").read_text())
+        for k in ("plants", "plants_us"):
+            if k in prev:
+                meta[k] = prev[k]
+        build_retired(meta)
+        if "retired" in meta and "error" not in meta["retired"]:
+            prev["retired"] = meta["retired"]
+        (OUT / "meta.json").write_text(json.dumps(prev, indent=2))
+        print("wrote retired.json and retired_history.json;", {k: meta.get("retired", {}).get(k) for k in ("rows_on_tab", "rows_kept", "history_rows_since_2015", "retirement_months")})
+        return 0
     meta = json.loads((CACHE / "provenance_eia.json").read_text())
     states = build_plants(meta, "pjm")
     build_demand(meta, "pjm")
@@ -699,6 +918,9 @@ def main() -> int:
     else:
         print("U.S. pulls not in the cache; building PJM files only. Run fetch_eia again to add the U.S. tabs.")
     build_retired(meta)
+    build_capgen(meta, "pjm")
+    if has_us:
+        build_capgen(meta, "us")
     dc = json.loads((OUT / "datacenters.json").read_text())["meta"]
     bp = CACHE / "provenance_bulk930.json"
     if bp.exists() and any((CACHE / f"bulk930_{n}").exists() for n in ("demand_hourly.csv.gz", "demand_us_hourly.csv.gz")):
