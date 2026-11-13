@@ -712,7 +712,7 @@ def _month_list(first: str, n: int) -> list[str]:
 def _ols(x: list[float], y: list[float]) -> dict | None:
     """Line through (capacity, generation) points. Reported as measurable only when capacity moved by at least 10% of its
     mean across the points; otherwise the slope says nothing about capacity."""
-    if len(x) < 4 or np.ptp(x) == 0:
+    if len(x) < 4 or np.ptp(x) == 0 or np.ptp(y) == 0:
         return None
     xa, ya = np.array(x, float), np.array(y, float)
     slope, icpt = np.polyfit(xa, ya, 1)
@@ -884,7 +884,7 @@ def build_capgen(meta: dict, scope: str) -> None:
         "caveats": {"units_skipped": skipped, "units_using_nameplate_for_missing_summer": basis_nameplate,
                     "capacity_as_reported_now": "each unit's capacity is its latest reported value applied to every month it was in service; uprates, derates and re-ratings are not tracked"},
     }
-    (OUT / f"capgen_{scope}.json").write_text(json.dumps(payload, separators=(",", ":")))
+    (OUT / f"capgen_{scope}.json").write_text(json.dumps(payload, separators=(",", ":"), allow_nan=False))
     meta.setdefault("capgen", {})[scope] = {"first_month": months[0], "last_month": months[-1], "windows": len(wins), **{k2: v for k2, v in payload["caveats"].items() if k2 == "units_skipped"}}
 
 
@@ -900,8 +900,17 @@ def main() -> int:
         build_retired(meta)
         if "retired" in meta and "error" not in meta["retired"]:
             prev["retired"] = meta["retired"]
-        (OUT / "meta.json").write_text(json.dumps(prev, indent=2))
         print("wrote retired.json and retired_history.json;", {k: meta.get("retired", {}).get(k) for k in ("rows_on_tab", "rows_kept", "history_rows_since_2015", "retirement_months")})
+        for sc in ("pjm", "us"):
+            build_capgen(prev, sc)
+        (OUT / "meta.json").write_text(json.dumps(prev, indent=2))
+        return 0
+    if "--capgen-only" in sys.argv:
+        # Rebuild only the capacity-and-generation files from the data files already in the output folder.
+        prev = json.loads((OUT / "meta.json").read_text())
+        for sc in ("pjm", "us"):
+            build_capgen(prev, sc)
+        (OUT / "meta.json").write_text(json.dumps(prev, indent=2))
         return 0
     meta = json.loads((CACHE / "provenance_eia.json").read_text())
     states = build_plants(meta, "pjm")
